@@ -86,6 +86,14 @@ describe('seekquel connector (unit)', () => {
     expect((await seekquelConnector.validate(CRED, fake.transport)).ok).toBe(false);
   });
 
+  it('keeps a just-approved link through a rate limit or server error on the check', async () => {
+    const fake = fakeTransport();
+    fake.on('/users/auth', 429, {});
+    expect((await seekquelConnector.validate(CRED, fake.transport)).ok).toBe(true);
+    fake.on('/users/auth', 503, {});
+    expect((await seekquelConnector.validate(CRED, fake.transport)).ok).toBe(true);
+  });
+
   it('matches by document id, with no network', async () => {
     const fake = fakeTransport();
     const m = await seekquelConnector.match(CRED, { document: DOC, title: 'Piranesi', author: 'Susanna Clarke', filename: null }, fake.transport);
@@ -165,10 +173,14 @@ describe('seekquel connector (unit)', () => {
     expect(finished).toMatchObject({ ok: false, retryable: true, error: expect.stringContaining('Seekquel') });
   });
 
-  it('asks to link again on 401 and retries on 429 and server errors', async () => {
+  it('asks to link again on 401, gives up on 403 without asking, and retries on 429 and server errors', async () => {
     const fake = fakeTransport();
     fake.on('/syncs/progress', 401, {});
     expect(await seekquelConnector.push(CRED, MATCH, progressEvent(), fake.transport)).toMatchObject({ ok: false, needsReauth: true });
+    fake.on('/syncs/progress', 403, {});
+    const forbidden = await seekquelConnector.push(CRED, MATCH, progressEvent(), fake.transport);
+    expect(forbidden).toMatchObject({ ok: false, retryable: false });
+    expect(forbidden).not.toHaveProperty('needsReauth');
     fake.on('/syncs/progress', 429, {});
     expect(await seekquelConnector.push(CRED, MATCH, progressEvent(), fake.transport)).toMatchObject({ ok: false, retryable: true });
     fake.on('/syncs/progress', 503, {});
@@ -250,5 +262,21 @@ describe('seekquel connector (end to end)', () => {
     expect(statusCalls()).toBe(1);
     await sync(1);
     expect(statusCalls()).toBe(2);
+  });
+
+  it('does not store a link whose key Seekquel refuses', async () => {
+    const fake = fakeTransport();
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    fake.on('/koreader/pair/start', 201, { device_code: 'd'.repeat(64), user_code: 'WXYZ-2345' });
+    const begin = await app.request('/api/v1/connectors/seekquel/link/begin', { method: 'POST', headers });
+    const { device_code } = await begin.json();
+    fake.on('/koreader/pair/poll', 200, { key: CRED.key });
+    fake.on('/users/auth', 401, {});
+    const poll = await app.request('/api/v1/connectors/seekquel/link/poll', { method: 'POST', headers, body: JSON.stringify({ device_code }) });
+    expect(poll.status).toBe(400);
+    expect((await poll.json()).status).toBe('error');
+    const list = await (await app.request('/api/v1/connectors', { headers })).json();
+    expect(list.connectors.find((c: { id: string }) => c.id === 'seekquel').linked).toBe(false);
   });
 });

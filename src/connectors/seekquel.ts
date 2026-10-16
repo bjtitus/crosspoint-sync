@@ -99,22 +99,28 @@ async function readJson(res: { json(): Promise<unknown> }): Promise<Record<strin
 }
 
 function failure(status: number, what: string): PushResult {
-  if (status === 401 || status === 403) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  if (status === 401) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  if (status === 403) return { ok: false, retryable: false, error: `${what}: forbidden` };
   if (status === 429) return { ok: false, retryable: true, error: 'rate limited' };
   if (status >= 500) return { ok: false, retryable: true, error: `server ${status}` };
   return { ok: false, retryable: false, error: `${what}: unexpected status ${status}` };
 }
 
+/**
+ * Only a 401 means Seekquel refused the key. The key being checked was issued by
+ * the pairing poll a moment ago, so a rate limit, a server error or a dropped
+ * connection here is no reason to throw away a link the reader just approved:
+ * the code is spent, and they would have to start again.
+ */
 async function validate(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
   const c = parseCred(cred);
   if (!c) return { ok: false, error: 'server and key are required' };
   try {
     const res = await http(`${c.server}/users/auth`, { method: 'GET', headers: headers(c) });
-    if (res.status === 200) return { ok: true, accountLabel: 'Seekquel' };
     if (res.status === 401) return { ok: false, error: 'Seekquel no longer accepts this link. Link it again.' };
-    return { ok: false, error: `unexpected status ${res.status}` };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: true, accountLabel: 'Seekquel' };
+  } catch {
+    return { ok: true, accountLabel: 'Seekquel' };
   }
 }
 
