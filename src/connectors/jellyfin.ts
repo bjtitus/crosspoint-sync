@@ -212,8 +212,10 @@ function itemAuthor(item: Record<string, unknown>): string | undefined {
   for (const p of people) {
     if (!p || typeof p !== "object") continue;
     const person = p as Record<string, unknown>;
-    const role = String(person.Role ?? person.Type ?? "").toLowerCase();
-    if (!role.includes("writer") && !role.includes("author")) continue;
+    const kinds = [person.Type, person.Role]
+      .map((v) => (typeof v === "string" ? v.toLowerCase() : ""));
+    if (!kinds.some((k) => k.includes("writer") || k.includes("author")))
+      continue;
     if (typeof person.Name === "string" && person.Name) names.push(person.Name);
   }
   if (names.length) return names.join(", ");
@@ -467,7 +469,7 @@ async function push(
     const remoteMs = Date.parse(remoteLast);
     if (
       Number.isFinite(remoteMs) &&
-      Math.floor(remoteMs / 1000) > ev.timestamp
+      remoteMs > ev.timestamp * 1000
     ) {
       return { ok: true };
     }
