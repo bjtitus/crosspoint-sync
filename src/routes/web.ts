@@ -8,7 +8,7 @@ import { SESSION_COOKIE, verifySession } from '../auth/session.js';
 import { extensionZip } from '../kindle-zip.js';
 import { HARDCOVER_NEW_KEY_URL, HARDCOVER_SCOPES } from '../connectors/hardcover.js';
 import { SERVER_URL_EXAMPLES } from '../connectors/server-url-examples.js';
-import { landingPage } from './landing.js';
+import { landingPage, metaTags } from './landing.js';
 
 const SERVER_URL_EXAMPLES_JS = JSON.stringify(SERVER_URL_EXAMPLES);
 
@@ -23,6 +23,7 @@ const SERVER_URL_EXAMPLES_JS = JSON.stringify(SERVER_URL_EXAMPLES);
 const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets');
 const LOGO = fs.readFileSync(path.join(ASSETS_DIR, 'logo.png'));
 const FAVICON = fs.readFileSync(path.join(ASSETS_DIR, 'favicon.png'));
+const OG_IMAGE = fs.readFileSync(path.join(ASSETS_DIR, 'og.jpg'));
 
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
@@ -219,6 +220,7 @@ function shell(title: string, body: string, wide = false): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title} · CrossPoint Sync</title>
+${metaTags(`${title} · CrossPoint Sync`)}
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
 <style>${FONT_FACES}${STYLE}</style></head>
@@ -1067,6 +1069,11 @@ export function webRoutes(legacy = process.env.LEGACY_WEB === '1'): Hono<AppEnv>
     c.header('content-type', 'image/png');
     c.header('cache-control', 'public, max-age=86400');
     return c.body(LOGO);
+  });
+  app.get('/og.jpg', (c) => {
+    c.header('content-type', 'image/jpeg');
+    c.header('cache-control', 'public, max-age=86400');
+    return c.body(OG_IMAGE);
   });
   app.get('/favicon.png', (c) => {
     c.header('content-type', 'image/png');

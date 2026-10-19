@@ -38,4 +38,14 @@ describe('app account endpoints', () => {
     expect((await app.request('/api/v1/account', { method: 'DELETE', headers })).status).toBe(200);
     expect((await app.request('/users/auth', { headers })).status).toBe(401);
   });
+
+  it('deletes an account with merged books and revealed connectors', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const { id } = db.prepare('SELECT id FROM users').get() as { id: number };
+    db.prepare('INSERT INTO document_aliases (user_id, alias, document, created_at) VALUES (?, ?, ?, 0)').run(id, 'a'.repeat(32), DOC);
+    db.prepare('INSERT INTO connector_reveals (user_id, connector_id, revealed_at) VALUES (?, ?, 0)').run(id, 'kindle');
+    expect((await app.request('/api/v1/account', { method: 'DELETE', headers })).status).toBe(200);
+    expect((await app.request('/users/auth', { headers })).status).toBe(401);
+  });
 });

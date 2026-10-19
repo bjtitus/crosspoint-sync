@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { localDay } from './readingHistory.js'
 
 vi.mock('./api.js', () => ({ isApp: true, http: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue() }))
@@ -17,6 +18,14 @@ beforeEach(async () => {
 afterEach(() => { delete window.CrossPointWidget })
 
 describe('widget account data', () => {
+  it('uses the grid-derived streak and republishes when dated history arrives', async () => {
+    const summary = { devices: [{ device: 'CrossInk' }], current_streak: 8, seconds: 3600 }
+    await updateWidget({ books: [book], summary })
+    expect(data().stats).toBe('8-day streak · 1h read')
+    await updateWidget({ books: [book], summary, activity: { books: [], reading_days: [localDay(new Date())] } })
+    expect(data().stats).toBe('1-day streak · 1h read')
+  })
+
   it('clears the previous book and stats on sign-out, including the Android bridge', async () => {
     window.CrossPointWidget = { update: vi.fn() }
     await update([book])

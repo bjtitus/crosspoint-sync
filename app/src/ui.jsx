@@ -101,33 +101,46 @@ export function LoadCacheProvider({ children }) {
   return <LoadCache.Provider value={cache}>{children}</LoadCache.Provider>
 }
 
-export function useLoad(fn, deps, memo, initial) {
+export function useLoad(fn, deps, memo, initial, { retries = 0, reportRefreshErrors = false, initialUpdatedAt } = {}) {
   const remembered = useContext(LoadCache)
   // `initial` (e.g. the saved offline copy) paints right away while fn() refreshes.
-  const [state, setState] = useState(() => ({ data: (memo ? remembered?.get(memo) : null) ?? initial?.() ?? null, error: null }))
+  const [state, setState] = useState(() => ({
+    data: (memo ? remembered?.get(memo) : null) ?? initial?.() ?? null,
+    error: null,
+    updatedAt: initialUpdatedAt?.() ?? null,
+  }))
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
   useEffect(() => {
     let live = true
+    let timer
     setLoading(true)
-    fn()
-      .then(
-        (data) => {
-          if (live) {
-            if (memo) remembered?.set(memo, data)
-            setState({ data, error: null })
-          }
-        },
-        // A failed refresh keeps whatever is already on screen.
-        (error) => live && setState((s) => (s.data ? s : { data: null, error }))
-      )
-      .finally(() => live && setLoading(false))
+    const load = async (attempt = 0) => {
+      try {
+        const data = await fn()
+        if (!live) return
+        if (memo) remembered?.set(memo, data)
+        setState({ data, error: null, updatedAt: Date.now() })
+        setLoading(false)
+      } catch (error) {
+        if (!live) return
+        // Opted-in screens retain saved data while making its stale state visible.
+        setState((s) => (s.data && !reportRefreshErrors ? s : { ...s, error }))
+        if (attempt < retries && error?.status !== 401) {
+          timer = setTimeout(() => load(attempt + 1), 1000 * 2 ** attempt)
+        } else {
+          setLoading(false)
+        }
+      }
+    }
+    load()
     return () => {
       live = false
+      clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, tick])
-  return [state.data, state.error, () => setTick((t) => t + 1), loading]
+  }, [...deps, tick, retries, reportRefreshErrors])
+  return [state.data, state.error, () => setTick((t) => t + 1), loading, state.updatedAt]
 }
 
 export function duration(seconds) {
@@ -335,7 +348,7 @@ export function EmptyState({ icon: Icon, note, title, children, action, compact 
 /** The pill button used as an empty state's action. */
 export function EmptyAction({ href, onClick, children }) {
   const cls =
-    'inline-flex h-10 items-center gap-1.5 rounded-full bg-brand-500 px-4 text-sm font-semibold text-white transition active:scale-[0.98] md:hover:bg-brand-600'
+    'inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full bg-brand-500 px-4 py-2 text-center text-sm font-semibold text-white transition active:scale-[0.98] md:hover:bg-brand-600'
   return href ? (
     <a href={href} className={cls}>
       {children}
@@ -343,6 +356,21 @@ export function EmptyAction({ href, onClick, children }) {
   ) : (
     <button type="button" onClick={onClick} className={cls}>
       {children}
+    </button>
+  )
+}
+
+export function Toggle({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={`relative h-7 w-12 shrink-0 rounded-full transition ${checked ? 'bg-brand-500' : 'bg-stone-300'}`}
+    >
+      <span className={`absolute top-0.5 size-6 rounded-full bg-surface shadow transition-all ${checked ? 'left-[1.4rem]' : 'left-0.5'}`} />
     </button>
   )
 }

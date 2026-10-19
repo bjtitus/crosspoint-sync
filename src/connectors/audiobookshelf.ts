@@ -1,6 +1,8 @@
+import { cachedEpub, epubPosition, epubXPath, withEpubMap, type TextEpub } from './bookfusion-epub.js';
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import type {
   Connector,
+  ConnectorContext,
   Credential,
   DocumentMeta,
   ExternalBook,
@@ -21,6 +23,11 @@ import type {
  * `currentTime / duration`, so we map ebook% -> currentTime = pct * duration.
  * This is approximate (text position != audio time) but lands you at roughly
  * the right spot. Verified against api.audiobookshelf.org + the ABS source.
+ *
+ * When the ABS item also has an EPUB, the device's KOReader XPath is resolved
+ * against that EPUB into an exact CFI and sent as `ebookLocation` (with
+ * `ebookProgress`). ABS's built-in reader resumes from `ebookLocation` only,
+ * so without it "Read" always opened at the start of the book.
  */
 
 interface AbsCred extends Credential {
@@ -188,41 +195,104 @@ async function resolveEdition(cred: Credential, externalId: string, http: HttpTr
   return d != null ? String(d) : null;
 }
 
-/**
- * Pull listening-position changes for bidirectional sync: read the user's media
- * progress and emit anything updated since the cursor. ABS derives `progress`
- * from currentTime/duration, so it maps straight back to a reading percentage.
- */
-async function pullChanges(cred: Credential, http: HttpTransport, sinceMs: number): Promise<InboundChange[]> {
-  const c = parseCred(cred);
-  if (!c) return [];
-  const r = await absGet(http, c, '/api/me');
-  const mp = Array.isArray(r.body?.mediaProgress) ? r.body.mediaProgress : [];
-  const out: InboundChange[] = [];
-  for (const p of mp) {
-    if (p?.episodeId) continue; // books only, not podcast episodes
-    const lu = typeof p?.lastUpdate === 'number' ? p.lastUpdate : 0;
-    if (lu <= sinceMs) continue;
-    let pct = typeof p?.progress === 'number' ? p.progress : 0;
-    if (!pct && typeof p?.currentTime === 'number' && typeof p?.duration === 'number' && p.duration > 0) {
-      pct = p.currentTime / p.duration;
-    }
-    if (p?.libraryItemId == null) continue;
-    out.push({
-      externalId: String(p.libraryItemId),
-      percentage: Math.max(0, Math.min(1, pct)),
-      finished: !!p?.isFinished,
-      updatedAtMs: lu,
+/** Items recently found to have no downloadable EPUB (audio-only), so pushes skip the lookup. */
+const noEpub = new Map<string, number>();
+const NO_EPUB_TTL = 60 * 60 * 1000;
+
+function noEpubKey(c: AbsCred, externalId: string): string {
+  return `${baseUrl(c.server)}\n${externalId}`;
+}
+
+/** The item's primary EPUB from ABS (`GET /api/items/:id/ebook`), briefly cached (text entries only). */
+function absEpub(http: HttpTransport, c: AbsCred, externalId: string): Promise<TextEpub> {
+  return cachedEpub(['audiobookshelf', baseUrl(c.server), c.token, externalId], async () => {
+    const res = await http(`${baseUrl(c.server)}/api/items/${encodeURIComponent(externalId)}/ebook`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${c.token}` },
     });
+    if (res.status === 404 || res.status === 400) noEpub.set(noEpubKey(c, externalId), Date.now() + NO_EPUB_TTL);
+    if (res.status < 200 || res.status >= 300) throw new Error(`ABS ebook download failed (${res.status})`);
+    return res;
+  });
+}
+
+function knownNoEpub(c: AbsCred, externalId: string): boolean {
+  const key = noEpubKey(c, externalId);
+  const until = noEpub.get(key);
+  if (until === undefined) return false;
+  if (until > Date.now()) return true;
+  noEpub.delete(key);
+  return false;
+}
+
+/** Test hook: forget which items were found to have no EPUB. */
+export function clearAbsNoEpubCache(): void {
+  noEpub.clear();
+}
+
+/**
+ * Resolve a KOReader XPath to an EPUB CFI in the ABS item's own EPUB. Null when
+ * the item has no EPUB or the position can't be placed - the push still lands
+ * the percentage, it just can't give ABS's reader an exact resume point.
+ */
+async function resolveCfi(
+  http: HttpTransport, c: AbsCred, m: Match, xpath: string, ctx?: ConnectorContext
+): Promise<string | null> {
+  if (knownNoEpub(c, m.externalId)) return null;
+  try {
+    const at = await withEpubMap(ctx, 'audiobookshelf', m.externalId, () => absEpub(http, c, m.externalId), (b) => epubPosition(b, xpath));
+    return at.cfi;
+  } catch {
+    return null;
   }
-  return out;
+}
+
+/**
+ * Pull this book's ABS position when a device asks for progress (and match it on
+ * demand), so opening a book you've been listening to jumps to the audiobook's
+ * spot before the device's older position is pushed over it. ABS derives
+ * `progress` from currentTime/duration, so it maps straight back to a reading
+ * percentage.
+ */
+async function pullProgress(
+  cred: Credential, m: Match, http: HttpTransport, sinceMs: number
+): Promise<InboundChange | null> {
+  const c = parseCred(cred);
+  if (!c) return null;
+  const { body: p } = await absGet(http, c, `/api/me/progress/${encodeURIComponent(m.externalId)}`);
+  const lu = typeof p?.lastUpdate === 'number' ? p.lastUpdate : 0;
+  if (!p || lu <= sinceMs) return null;
+  const hasAudio = typeof p.duration === 'number' && p.duration > 0;
+  let pct = typeof p.progress === 'number' ? p.progress : 0;
+  if (!pct && hasAudio && typeof p.currentTime === 'number') {
+    pct = p.currentTime / p.duration;
+  }
+  // Ebook-only items are read in ABS's own reader, which records its position
+  // as ebookProgress + an ebookLocation CFI rather than `progress`. Items with
+  // audio keep the listening position (that is the audiobook<->ebook sync).
+  let progress: string | undefined;
+  if (!hasAudio && typeof p.ebookProgress === 'number') {
+    pct = p.ebookProgress;
+    const cfi = p.ebookLocation;
+    if (typeof cfi === 'string' && cfi.startsWith('epubcfi(') && !knownNoEpub(c, m.externalId)) {
+      progress = await absEpub(http, c, m.externalId).then((b) => epubXPath(b, cfi)).catch(() => undefined);
+    }
+  }
+  return {
+    externalId: m.externalId,
+    percentage: Math.max(0, Math.min(1, pct)),
+    finished: !!p.isFinished,
+    ...(progress ? { progress } : {}),
+    updatedAtMs: lu,
+  };
 }
 
 async function push(
   cred: Credential,
   m: Match,
   ev: OutboundEvent,
-  http: HttpTransport
+  http: HttpTransport,
+  ctx?: ConnectorContext
 ): Promise<PushResult> {
   const c = parseCred(cred);
   if (!c) return { ok: false, retryable: false, needsReauth: true, error: 'bad credential' };
@@ -244,6 +314,14 @@ async function push(
   if (duration) {
     payload.duration = duration;
     payload.currentTime = Math.max(0, Math.min(duration, pct * duration));
+  }
+
+  // The ebook side of the same progress record. ABS's reader shows ebookProgress
+  // and resumes from ebookLocation (a CFI); `progress` alone opens at page one.
+  payload.ebookProgress = finished ? 1 : pct;
+  if (!finished && ev.progress?.startsWith('/body')) {
+    const cfi = await resolveCfi(http, c, m, ev.progress, ctx);
+    if (cfi) payload.ebookLocation = cfi;
   }
 
   const res = await http(`${baseUrl(c.server)}/api/me/progress/${encodeURIComponent(m.externalId)}`, {
@@ -274,5 +352,5 @@ export const audiobookshelfConnector: Connector = {
   listCurrentlyReading,
   search,
   resolveEdition,
-  pullChanges,
+  pullProgress,
 };

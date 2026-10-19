@@ -51,6 +51,18 @@ describe('kosync mirror connector (unit)', () => {
     expect(fake.calls[0].url).toContain('/users/auth');
   });
 
+  it('sends Basic auth only to Calibre-Web /kosync servers', async () => {
+    const seen: Record<string, string>[] = [];
+    const t: HttpTransport = async (_url, init) => {
+      seen.push(init.headers as Record<string, string>);
+      return { status: 200, text: async () => '{}', json: async () => ({}) };
+    };
+    await kosyncConnector.validate({ server: 'cwa.test/kosync/', username: 'u', password: 'p' }, t);
+    await kosyncConnector.validate({ server: 'srv.test', username: 'u', password: 'p' }, t);
+    expect(seen[0].authorization).toBe(`Basic ${Buffer.from('u:p').toString('base64')}`);
+    expect(seen[1].authorization).toBeUndefined();
+  });
+
   it('push forwards progress string + position to the target', async () => {
     const fake = fakeTransport();
     fake.on('/syncs/progress', 200, {});
@@ -206,18 +218,35 @@ describe('audiobookshelf connector', () => {
 describe('audiobookshelf fan-in (audiobook -> ebook)', () => {
   const CRED = { server: 'abs.test', token: 'k' };
 
-  it('pullChanges emits book progress updated since the cursor', async () => {
+  it('pullProgress returns the book position only when newer than ours', async () => {
     const fake = fakeTransport();
-    fake.on('/api/me', 200, {
-      mediaProgress: [
-        { libraryItemId: 'li_1', progress: 0.6, isFinished: false, lastUpdate: 2000, episodeId: null },
-        { libraryItemId: 'li_old', progress: 0.2, isFinished: false, lastUpdate: 500, episodeId: null },
-        { libraryItemId: 'ep_x', progress: 0.9, isFinished: false, lastUpdate: 3000, episodeId: 'ep_x' },
-      ],
+    fake.on('/api/me/progress/li_1', 200, { libraryItemId: 'li_1', progress: 0.6, isFinished: false, lastUpdate: 2000 });
+    const m = { externalId: 'li_1', externalEdition: null, confidence: 1 };
+    expect(await audiobookshelfConnector.pullProgress!(CRED, m, fake.transport, 1000))
+      .toEqual({ externalId: 'li_1', percentage: 0.6, finished: false, updatedAtMs: 2000 });
+    expect(await audiobookshelfConnector.pullProgress!(CRED, m, fake.transport, 2000)).toBeNull();
+  });
+
+  it('opening a book you listened to since matches on demand and returns the audiobook position', async () => {
+    const fake = fakeTransport();
+    fake.on('/api/me', 200, { username: 'julia' });
+    const { app } = makeTestApp({}, { connectorTransport: fake.transport });
+    const { headers } = await registerUser(app);
+    await app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.1, device_id: 'reader' }),
     });
-    const changes = await audiobookshelfConnector.pullChanges!(CRED, fake.transport, 1000);
-    // Only li_1 (newer than cursor, and a book not a podcast episode).
-    expect(changes).toEqual([{ externalId: 'li_1', percentage: 0.6, finished: false, updatedAtMs: 2000 }]);
+    await app.request('/api/v1/documents', {
+      method: 'PUT', headers, body: JSON.stringify({ items: [{ document: DOC, title: 'Foundryside', author: 'Robert Jackson Bennett' }] }),
+    });
+    await app.request('/api/v1/connectors/audiobookshelf', {
+      method: 'PUT', headers, body: JSON.stringify({ credential: { server: 'abs.test', token: 'k' } }),
+    });
+    // Listened in ABS after the device last synced; no match exists yet.
+    fake.on('/api/me/items-in-progress', 200, { libraryItems: [{ id: 'li_1', media: { duration: 1000, metadata: { title: 'Foundryside', authorName: 'Robert Jackson Bennett' } } }] });
+    fake.on('/api/me/progress/li_1', 200, { libraryItemId: 'li_1', duration: 1000, currentTime: 550, progress: 0.55, isFinished: false, lastUpdate: Date.now() + 5000 });
+    const got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
+    expect(got.percentage).toBe(0.55);
+    expect(fake.calls.some((c) => c.method === 'PATCH')).toBe(false);
   });
 
   it('poller writes the audiobook position to canonical progress and fans out to others (not ABS)', async () => {
@@ -241,7 +270,7 @@ describe('audiobookshelf fan-in (audiobook -> ebook)', () => {
       method: 'PUT', headers,
       body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.2, device_id: 'reader' }),
     });
-    fake.on('/api/me', 200, { mediaProgress: [{ libraryItemId: 'li_1', progress: 0.6, isFinished: false, lastUpdate: 5000, episodeId: null }] });
+    fake.on('/api/me/progress/li_1', 200, { libraryItemId: 'li_1', progress: 0.6, isFinished: false, lastUpdate: Date.now() + 5000 });
     // Clear whatever the device's own 0.2% sync queued, so we only observe fan-in.
     db.prepare('DELETE FROM connector_queue').run();
 
@@ -276,7 +305,7 @@ describe('audiobookshelf fan-in (audiobook -> ebook)', () => {
       method: 'PUT', headers,
       body: JSON.stringify({ document: DOC, progress: XPOINTER, percentage: 0.38, device_id: 'kindle' }),
     });
-    fake.on('/api/me', 200, { mediaProgress: [{ libraryItemId: 'li_1', progress: 0.62, isFinished: false, lastUpdate: 8000, episodeId: null }] });
+    fake.on('/api/me/progress/li_1', 200, { libraryItemId: 'li_1', progress: 0.62, isFinished: false, lastUpdate: Date.now() + 8000 });
     db.prepare('DELETE FROM connector_queue').run();
 
     const applied = await pollConnector(db, userId, 'audiobookshelf', fake.transport);
@@ -293,7 +322,7 @@ describe('audiobookshelf fan-in (audiobook -> ebook)', () => {
     await app.request('/syncs/progress', {
       method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: NEAR, percentage: 0.652, device_id: 'kindle' }),
     });
-    fake.on('/api/me', 200, { mediaProgress: [{ libraryItemId: 'li_1', progress: 0.655, isFinished: false, lastUpdate: 9000, episodeId: null }] });
+    fake.on('/api/me/progress/li_1', 200, { libraryItemId: 'li_1', progress: 0.655, isFinished: false, lastUpdate: Date.now() + 9000 });
     expect(await pollConnector(db, userId, 'audiobookshelf', fake.transport)).toBe(1);
     got = await (await app.request(`/syncs/progress/${DOC}`, { headers })).json();
     expect(got.percentage).toBe(0.655);
@@ -335,7 +364,7 @@ describe('audiobookshelf fan-in (audiobook -> ebook)', () => {
       method: 'PUT', headers,
       body: JSON.stringify({ document: DOC, progress: 'p', percentage: 0.4, device_id: 'reader' }),
     });
-    fake.on('/api/me', 200, { mediaProgress: [{ libraryItemId: 'li_1', progress: 0.401, isFinished: false, lastUpdate: 9000, episodeId: null }] });
+    fake.on('/api/me/progress/li_1', 200, { libraryItemId: 'li_1', progress: 0.401, isFinished: false, lastUpdate: Date.now() + 9000 });
     const applied = await pollConnector(db, userId, 'audiobookshelf', fake.transport);
     expect(applied).toBe(0); // within epsilon -> ignored
   });

@@ -69,6 +69,10 @@ class MainActivity : TauriActivity() {
     // Paint the page colour until the web app draws, instead of WebView's default black.
     val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     webView.setBackgroundColor(if (night) PAPER_DARK else PAPER)
+    // WebView's textZoom grows text but not the boxes around it, so large system
+    // fonts overflowed fixed-height buttons. The page scales its root font size
+    // by CrossPointTheme.fontScale() instead, which grows every rem together.
+    webView.settings.textZoom = 100
     webView.addJavascriptInterface(ShareBridge(), "CrossPointShare")
     webView.addJavascriptInterface(WidgetBridge(), "CrossPointWidget")
     webView.addJavascriptInterface(ThemeBridge(), "CrossPointTheme")
@@ -112,6 +116,9 @@ class MainActivity : TauriActivity() {
   // In-app Appearance: window.CrossPointTheme.apply("system"|"light"|"dark", isDark).
   // The per-app night mode also picks the values-night splash on the next launch.
   inner class ThemeBridge {
+    @JavascriptInterface
+    fun fontScale(): Float = resources.configuration.fontScale
+
     @JavascriptInterface
     fun ready() {
       webReady = true

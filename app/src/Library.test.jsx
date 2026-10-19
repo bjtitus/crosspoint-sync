@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import Library from './Library.jsx'
+import { localDay } from './readingHistory.js'
 
 vi.mock('./api.js', () => ({ isApp: false, api: { cover: vi.fn() } }))
 vi.hoisted(() => {
@@ -15,6 +16,15 @@ const reading = { document: 'reading', title: 'Still reading', status: 'reading'
 afterEach(cleanup)
 
 describe('Library completion updates', () => {
+  it('shows the grid-derived streak and uses the device total until dated history loads', () => {
+    const summary = { devices: [{ device: 'CrossInk' }], current_streak: 8, seconds: 0, completed: 0 }
+    const { getByText, rerender } = render(<Library session={session} books={[]} summary={summary} />)
+    expect(getByText('day streak').previousElementSibling.textContent).toBe('8')
+    const activity = { books: [], reading_days: [localDay(new Date())] }
+    rerender(<Library session={session} books={[]} summary={summary} activity={activity} />)
+    expect(getByText('day streak').previousElementSibling.textContent).toBe('1')
+  })
+
   it('replaces the Continue reading book when its finished status arrives', () => {
     const { container, getByRole, getByText, rerender } = render(
       <Library session={session} books={[{ ...finished, status: 'reading' }, reading]} />,

@@ -65,7 +65,7 @@ function clearOffline() {
   }
 }
 
-async function call(session, path, init = {}, keepOffline = true) {
+async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false } = {}) {
   const version = sessionVersion
   const key = `${OFFLINE}${session.username}@${session.server}${path}`
   const isGet = keepOffline && (!init.method || init.method === 'GET')
@@ -83,7 +83,7 @@ async function call(session, path, init = {}, keepOffline = true) {
     })
   } catch (e) {
     const saved = isGet && version === sessionVersion && localStorage.getItem(key)
-    if (!saved) throw e
+    if (!saved || !offlineFallback) throw e
     offline.dispatchEvent(new Event('offline'))
     return JSON.parse(saved)
   }
@@ -98,6 +98,7 @@ async function call(session, path, init = {}, keepOffline = true) {
     offline.dispatchEvent(new Event('online'))
     try {
       localStorage.setItem(key, JSON.stringify(data))
+      if (timestampSaved) localStorage.setItem(`${key}:saved-at`, JSON.stringify(Date.now()))
     } catch {
       // storage full: offline copy just stays older
     }
@@ -178,6 +179,10 @@ export const cached = {
   },
   summary: (s) => saved(s, '/api/v1/stats/summary'),
   activity: (s) => saved(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),
+  activityUpdatedAt: (s) => {
+    const at = saved(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}:saved-at`)
+    return Number.isFinite(at) && at > 0 ? at : null
+  },
 }
 
 export const api = {
@@ -185,7 +190,9 @@ export const api = {
   books: (s) => call(s, '/api/v1/progress?limit=500').then(bookList),
   summary: (s) => call(s, '/api/v1/stats/summary'),
   // tz: minutes behind UTC, so the server buckets pages into local days.
-  activity: (s) => call(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),
+  // Saved activity paints immediately via cached.activity, but a failed refresh
+  // must reject so the screen can warn about stale data and retry.
+  activity: (s) => call(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`, {}, true, { offlineFallback: false, timestampSaved: true }),
   bookStats: (s, doc) => call(s, `/api/v1/stats/books/${doc}`),
   cover: (s, doc) => call(s, `/api/v1/documents/${doc}/cover`),
   next: (s, doc) => call(s, `/api/v1/documents/${doc}/next`),
@@ -195,6 +202,7 @@ export const api = {
   linkConnector: (s, id, credential) => call(s, `/api/v1/connectors/${id}`, { method: 'PUT', body: JSON.stringify({ credential }) }),
   unlinkConnector: (s, id) => call(s, `/api/v1/connectors/${id}`, { method: 'DELETE' }),
   syncConnector: (s, id) => call(s, `/api/v1/connectors/${id}/sync`, { method: 'POST' }),
+  setConnectorOptions: (s, id, options) => call(s, `/api/v1/connectors/${id}/options`, { method: 'PUT', body: JSON.stringify(options) }),
   beginLink: (s, id) => call(s, `/api/v1/connectors/${id}/link/begin`, { method: 'POST' }),
   // Browser sign-in (OAuth): the server holds PKCE; the app finishes it only when its app link catches the redirect.
   oauthBegin: (s, id, client) => call(s, `/api/v1/connectors/${id}/oauth/begin`, { method: 'POST', body: JSON.stringify({ client }) }),

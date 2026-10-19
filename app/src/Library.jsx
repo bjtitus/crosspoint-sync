@@ -1,3 +1,4 @@
+import { readingStreak } from './readingHistory.js'
 import { useState } from 'react'
 import { BookOpen, ChevronRight, Merge } from 'lucide-react'
 import { isApp } from './api.js'
@@ -90,7 +91,7 @@ export default function Library({ session, books, summary, activity }) {
         <div className="mt-4 grid grid-cols-3 divide-x divide-stone-200 rounded-xl bg-surface py-3 text-center ring-1 ring-stone-950/5 md:mt-0 md:w-96 md:shrink-0">
           {(summary?.devices?.length > 0
             ? [
-                [summary.current_streak, 'day streak'],
+                [readingStreak(summary, activity), 'day streak'],
                 [duration(summary.seconds).split(' ')[0], 'read'],
                 [summary.completed, 'finished'],
               ]

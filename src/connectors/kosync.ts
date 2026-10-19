@@ -49,7 +49,13 @@ export function baseUrl(server: string): string {
 }
 
 function authHeaders(c: KosyncCred): Record<string, string> {
+  // Calibre-Web (Automated) serves kosync under /kosync and only accepts Basic auth.
+  // Only send the plaintext password there; stock kosync servers get the md5 key alone.
+  const basic: Record<string, string> = baseUrl(c.server).endsWith('/kosync')
+    ? { authorization: `Basic ${Buffer.from(`${c.username}:${c.password}`).toString('base64')}` }
+    : {};
   return {
+    ...basic,
     'x-auth-user': c.username,
     'x-auth-key': md5(c.password),
     accept: 'application/vnd.koreader.v1+json',

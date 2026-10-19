@@ -4,27 +4,25 @@ import ShareSheet from './ShareSheet.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
 import { Card, Cover, EmptyState, Eyebrow, ProgressBar, ViaHardcover, duration, pct } from './ui.jsx'
 import { isPace, moodEmoji } from './moods.js'
+import { decodeHistory, localDay, longestReadingStreak, readingStreak, shadeLevels } from './readingHistory.js'
 
-const WEEKS = 52 // phones show the newest 26
-const EPOCH = Date.UTC(2000, 0, 1)
+export { decodeHistory } from './readingHistory.js'
 
-// history_b64: bit N (LSB-first per byte) = anchor_day - N, anchor_day = days since 2000-01-01.
-export function decodeHistory(b64, anchorDay, readingDays = []) {
-  const bytes = Uint8Array.from(atob(b64 || ''), (ch) => ch.charCodeAt(0))
-  const extra = new Set(readingDays)
-  const today = localDay(new Date())
-  const latest = readingDays.filter((day) => day <= today).sort().at(-1)
-  const original = EPOCH + anchorDay * 86400000
-  const anchor = new Date(Math.max(original, latest ? Date.parse(`${latest}T00:00:00Z`) : original))
-  const shift = (anchor.getTime() - original) / 86400000
-  const read = (n) => {
-    if (n < 0) return false
-    const day = new Date(anchor.getTime() - n * 86400000).toISOString().slice(0, 10)
-    const bit = n - shift
-    return extra.has(day) || (bit >= 0 && bit < bytes.length * 8 && ((bytes[bit >> 3] >> (bit & 7)) & 1) === 1)
-  }
-  const anchorRow = (anchor.getUTCDay() + 6) % 7 // Monday = 0
-  return { read, anchor, anchorRow }
+// Shades for the reading calendar, light to dark; levels 1-4 are relative to your median day.
+const SHADES = ['bg-stone-100', 'bg-brand-200', 'bg-brand-300', 'bg-brand-400', 'bg-brand-500']
+const FALLBACK_SECONDS = 30 * 60 // median assumed until there is enough history
+const FALLBACK_PAGES = 20
+
+function ShadeLegend() {
+  return (
+    <div className="flex items-center gap-1 font-mono text-[0.65rem] text-stone-400">
+      Less
+      {SHADES.map((c) => (
+        <span key={c} aria-hidden="true" className={`size-2.5 rounded-[2px] ${c}`} />
+      ))}
+      More
+    </div>
+  )
 }
 
 // A tooltip for grid cells carrying data-tip: follows the mouse on hover, and on
@@ -39,7 +37,7 @@ function useCellTip() {
     const r = cell.getBoundingClientRect()
     const x = r.left + r.width / 2 - outer.left
     // Keep the bubble inside the card near the edges.
-    setTip({ text: cell.dataset.tip, x: Math.min(Math.max(x, 72), outer.width - 72), y: r.top - outer.top })
+    setTip({ text: cell.dataset.tip, x: Math.min(Math.max(x, 128), outer.width - 128), y: r.top - outer.top })
   }
   const hide = () => setTip(null)
   const handlers = {
@@ -54,7 +52,7 @@ function useCellTip() {
   const bubble = tip && (
     <div
       role="tooltip"
-      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-md bg-stone-900 px-2 py-1 font-mono text-[0.7rem] whitespace-nowrap text-stone-50 shadow-md"
+      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-md bg-stone-900 px-2 py-1 text-center font-mono text-[0.7rem] whitespace-pre text-stone-50 shadow-md"
       style={{ left: tip.x, top: tip.y - 6 }}
     >
       {tip.text}
@@ -77,59 +75,21 @@ const deviceList = (devices) => {
   return [...counts].map(([name, n]) => (n > 1 ? `${n} ${name} readers` : name)).join(', ')
 }
 
-function Heatmap({ summary, activity }) {
-  const { read, anchor, anchorRow } = decodeHistory(summary.history_b64, summary.anchor_day, activity?.reading_days)
-  let days = 0
-  for (let n = 0; n < 365; n++) if (read(n)) days++
-  const cols = Array.from({ length: WEEKS }, (_, c) =>
-    Array.from({ length: 7 }, (_, r) => anchorRow - r + (WEEKS - 1 - c) * 7)
-  )
-  const { box, handlers, bubble } = useCellTip()
-  const tipFor = (n) => {
-    const d = new Date(anchor.getTime() - n * 86400000)
-    return `${d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}: ${read(n) ? 'read' : 'no reading'}`
-  }
-  return (
-    <Card className="mt-4 p-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="font-display text-lg font-semibold text-stone-900">Reading days</h2>
-        <p className="font-mono text-xs text-stone-500">{days} in the last year</p>
-      </div>
-      <div ref={box} {...handlers} style={NO_CALLOUT} className="relative mt-3 flex justify-between gap-[3px] select-none">
-        {bubble}
-        {cols.map((col, c) => (
-          <div key={c} className={`flex-1 flex-col gap-[3px] ${c < WEEKS / 2 ? 'hidden md:flex' : 'flex'}`}>
-            {col.map((n) => (
-              <div
-                key={n}
-                data-tip={n < 0 ? undefined : tipFor(n)}
-                className={`aspect-square rounded-[2px] ${n < 0 ? 'bg-transparent' : read(n) ? 'bg-brand-500' : 'bg-stone-100'}`}
-              />
-            ))}
-          </div>
-        ))}
-      </div>
-      <p className="mt-2 text-right font-mono text-[0.65rem] text-stone-400">
-        through {anchor.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}
-      </p>
-    </Card>
-  )
-}
-
 function Bars({ title, labels, values }) {
   const max = Math.max(...values, 1)
   return (
     <Card className="mt-4 p-4">
       <h2 className="font-display text-lg font-semibold text-stone-900">{title}</h2>
-      <div className="mt-3 space-y-2">
+      {/* One grid for all rows, so the value column fits the widest duration and the bars share what's left. */}
+      <div className="mt-3 grid grid-cols-[4rem_1fr_auto] items-center gap-x-3 gap-y-2 text-xs">
         {labels.map((l, i) => (
-          <div key={l} className="flex items-center gap-3 text-xs">
-            <span className="w-16 shrink-0 text-stone-500">{l}</span>
-            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-stone-100">
+          <Fragment key={l}>
+            <span className="text-stone-500">{l}</span>
+            <div className="h-2.5 overflow-hidden rounded-full bg-stone-100">
               <div className="h-full rounded-full bg-brand-500" style={{ width: `${(values[i] / max) * 100}%` }} />
             </div>
-            <span className="w-14 shrink-0 text-right font-mono text-stone-500">{duration(values[i])}</span>
-          </div>
+            <span className="text-right font-mono whitespace-nowrap text-stone-500">{duration(values[i])}</span>
+          </Fragment>
         ))}
       </div>
     </Card>
@@ -248,8 +208,10 @@ function WhatYouRead({ books }) {
 }
 
 function Tiles({ tiles, action }) {
+  // Four columns keep eight tiles from leaving an empty cell.
+  const cols = tiles.length % 4 === 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'
   return (
-    <Card className="relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 md:grid-cols-3">
+    <Card className={`relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 ${cols}`}>
       {action}
       {tiles.map(([l, v]) => (
         <div key={l} className="bg-surface px-4 py-3">
@@ -262,7 +224,16 @@ function Tiles({ tiles, action }) {
 }
 
 const DAY_MS = 86400000
-const localDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+// Once daily history exists, days without reading count as zero in the 7-day average.
+function dailyReading(daily) {
+  const byDay = new Map(daily.map((d) => [d.date, d.seconds]))
+  const now = new Date()
+  now.setHours(12, 0, 0, 0)
+  let total = 0
+  for (let i = 0; i < 7; i++) total += byDay.get(localDay(new Date(now.getTime() - i * DAY_MS))) ?? 0
+  return { today: byDay.get(localDay(now)) ?? 0, average: total / 7 }
+}
 
 // Print pages per week (Monday start), newest week last.
 function weeklyPages(days, weeks = 12) {
@@ -307,9 +278,8 @@ function WeeklyPages({ days, weeks = 12 }) {
   )
 }
 
-// Calendar of reading days from the sync history: one square per day, shaded by
-// print pages read that day. Weekday rows (Monday first), weeks run left to right.
-const SHADES = ['bg-stone-100', 'bg-brand-100', 'bg-brand-200', 'bg-brand-300', 'bg-brand-400']
+// Calendar of reading days: one square per day, shaded by pages or reading time
+// against your median day. Weekday rows (Monday first), weeks run left to right.
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const SCALES = [
   ['month', 'Month'],
@@ -337,16 +307,55 @@ function calendarRange(scale, back, today) {
   return { weeks, first, last, label: `${fmt(first, opts)} to ${fmt(last > today ? today : last, { month: 'short', year: 'numeric' })}` }
 }
 
-function ReadingCalendar({ days, readingDays = [], books = [] }) {
+const HISTORY_DAYS = 730
+
+// Read days from sync history: any sync marks a day, mapped to pages read (chosen dates count as 0).
+function pagesByDay(days, readingDays = []) {
+  const byDay = new Map(days.filter((d) => d.syncs > 0 || d.pages > 0).map((d) => [d.day, d.pages]))
+  for (const day of readingDays) if (!byDay.has(day)) byDay.set(day, 0)
+  return byDay
+}
+
+// Read days from device history and chosen dates, mapped to recorded seconds (undefined when unknown).
+function timeByDay(summary, activity) {
+  const { read, anchor } = decodeHistory(summary.history_b64, summary.anchor_day, activity?.reading_days)
+  const seconds = new Map((summary.daily ?? []).map((d) => [d.date, d.seconds]))
+  const byDay = new Map()
+  for (let n = 0; n < HISTORY_DAYS; n++) {
+    if (!read(n)) continue
+    const key = new Date(anchor.getTime() - n * DAY_MS).toISOString().slice(0, 10)
+    byDay.set(key, seconds.get(key))
+  }
+  for (const [key, s] of seconds) if (s > 0 && !byDay.has(key)) byDay.set(key, s)
+  return byDay
+}
+
+const PAGES_VIEW = {
+  source: 'Print pages estimated from synced progress',
+  fallback: FALLBACK_PAGES,
+  tip: (pages) => (pages ? `${Math.round(pages)} pages` : 'read'),
+  total: ['pages read', (n) => Math.round(n).toLocaleString()],
+}
+const TIME_VIEW = {
+  source: 'Reading time recorded by your reader',
+  fallback: FALLBACK_SECONDS,
+  tip: (seconds) => (seconds === undefined ? 'read' : `${duration(seconds)} reading time`),
+  total: ['time read', duration],
+}
+// Older firmware sends read-day flags without daily time counters.
+const DAYS_VIEW = {
+  fallback: FALLBACK_SECONDS,
+  tip: () => 'read',
+}
+
+// byDay: every read day -> amount (undefined when unknown); view describes the available data.
+function ReadingCalendar({ byDay, view, days = [], books = [] }) {
   const [scale, setScale] = useState('year')
   const [back, setBack] = useState(0)
   const [sharing, setSharing] = useState(false)
   const scroller = useRef(null)
-  // Any sync marks a reading day; pages read deepen the shade.
-  const byDay = new Map(days.filter((d) => d.syncs > 0 || d.pages > 0).map((d) => [d.day, d.pages]))
-  for (const day of readingDays) if (!byDay.has(day)) byDay.set(day, 0)
-  const max = Math.max(...byDay.values(), 1)
-  const level = (day) => (!byDay.has(day) ? 0 : Math.max(1, Math.min(4, Math.ceil((byDay.get(day) / max) * 4))))
+  const { level: amountLevel } = shadeLevels(byDay, { fallback: view.fallback })
+  const level = (day) => (!byDay.has(day) ? 0 : amountLevel(byDay.get(day)))
   const today = new Date()
   today.setHours(12, 0, 0, 0)
   const { weeks, first, last, label } = calendarRange(scale, back, today)
@@ -366,17 +375,15 @@ function ReadingCalendar({ days, readingDays = [], books = [] }) {
   const cell = (d, round) => {
     if (!shown(d)) return <div key={d.getTime()} className="aspect-square" />
     const key = localDay(d)
-    const pages = byDay.get(key) ?? 0
-    const lv = level(key)
-    const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${pages ? `${Math.round(pages)} pages` : lv ? 'read' : 'no reading'}`
-    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[lv]}`} />
+    const tip = `${fmt(d, { weekday: 'short', month: 'short', day: 'numeric' })}: ${byDay.has(key) ? view.tip(byDay.get(key)) : 'no reading'}`
+    return <div key={d.getTime()} data-tip={tip} aria-label={tip} className={`aspect-square ${round} ${SHADES[level(key)]}`} />
   }
-  // Share image: the period on screen, its reading days, pages and longest streak.
+  // Share the visible period, reading days, available page/time totals and longest streak.
   const share = () => {
-    let pages = 0, streak = 0, run = 0
+    let total = 0, streak = 0, run = 0
     for (let d = first; d <= last && d <= today; d = new Date(d.getTime() + DAY_MS)) {
       const key = localDay(d)
-      pages += byDay.get(key) ?? 0
+      total += byDay.get(key) ?? 0
       run = byDay.has(key) ? run + 1 : 0
       streak = Math.max(streak, run)
     }
@@ -411,7 +418,7 @@ function ReadingCalendar({ days, readingDays = [], books = [] }) {
       subtitle: label,
       tiles: [
         ['reading days', count],
-        ['pages read', Math.round(pages).toLocaleString()],
+        ...(view.total ? [[view.total[0], view.total[1](total)]] : []),
         ['day streak', streak],
       ],
       blocks,
@@ -430,7 +437,7 @@ function ReadingCalendar({ days, readingDays = [], books = [] }) {
             fileName: `Reading days ${label}.png`,
             text: `${count} reading ${count === 1 ? 'day' : 'days'}, ${label}. Tracked with CrossPoint Sync.`,
           }}
-          renderKey={`${scale}-${back}-${count}`}
+          renderKey={`${view.total?.[0] ?? 'reading days'}-${scale}-${back}-${count}`}
           onClose={() => setSharing(false)}
           render={share}
         />
@@ -460,6 +467,7 @@ function ReadingCalendar({ days, readingDays = [], books = [] }) {
           ))}
         </div>
       </div>
+      {view.source && <p className="mt-3 text-xs text-stone-500">{view.source}</p>}
       <div className="mt-3 flex items-center justify-between">
         <button type="button" className={arrow} onClick={() => setBack(back + 1)} aria-label="Earlier">
           <ChevronLeft className="size-5" strokeWidth={1.75} />
@@ -489,11 +497,12 @@ function ReadingCalendar({ days, readingDays = [], books = [] }) {
         ) : (
           <div ref={scroller} className="mt-3 overflow-x-auto">
             <div
-              className={`grid ${year ? 'w-max min-w-full' : 'w-full'}`}
+              // Phones scroll a year at 11px squares; wider screens fit it to the card.
+              className={`grid ${year ? 'w-max min-w-full [--cell-min:11px] md:w-full md:[--cell-min:0px]' : 'w-full'}`}
               style={{
                 gridAutoFlow: 'column',
                 gridTemplateRows: 'repeat(7, auto) auto',
-                gridTemplateColumns: `auto repeat(${weeks.length}, minmax(${year ? '11px' : '0'}, ${year ? '1fr' : '2.25rem'}))`,
+                gridTemplateColumns: `auto repeat(${weeks.length}, minmax(${year ? 'var(--cell-min)' : '0'}, ${year ? '1fr' : '2.25rem'}))`,
                 gap: 3,
                 justifyContent: year ? undefined : 'center',
               }}
@@ -516,16 +525,20 @@ function ReadingCalendar({ days, readingDays = [], books = [] }) {
           </div>
         )}
       </div>
+      {view.total && <div className="mt-3"><ShadeLegend /></div>}
     </Card>
   )
 }
 
+const FINISHED_PER_PAGE = 5
+
 function Finished({ list, titles }) {
+  const [shown, setShown] = useState(FINISHED_PER_PAGE)
   if (!list.length) return null
   return (
     <Card className="mt-4 divide-y divide-stone-100 px-4">
       <h2 className="py-3 font-display text-lg font-semibold text-stone-900">Finished</h2>
-      {list.map((b) => (
+      {list.slice(0, shown).map((b) => (
         <a key={b.document} href={`#/book/${b.document}`} className="flex items-baseline justify-between gap-3 py-2.5">
           <span className="truncate text-sm font-medium text-stone-800">{titles.get(b.document) ?? b.document}</span>
           <span className="shrink-0 font-mono text-xs text-stone-500">
@@ -533,6 +546,15 @@ function Finished({ list, titles }) {
           </span>
         </a>
       ))}
+      {list.length > shown && (
+        <button
+          type="button"
+          onClick={() => setShown(shown + FINISHED_PER_PAGE)}
+          className="w-full py-3 text-sm font-semibold text-brand-600"
+        >
+          Show more ({list.length - shown})
+        </button>
+      )}
     </Card>
   )
 }
@@ -579,44 +601,106 @@ function PagesAndBooks({ activity: all, books, onShare }) {
   )
 }
 
-// The stats share card: this year's headline numbers, recent covers, weekly pages.
+// The stats share card for this week, month or year: headline numbers, covers, pages over time.
+const PERIODS = [
+  ['week', 'Week'],
+  ['month', 'Month'],
+  ['year', 'Year'],
+]
+
+// The period so far, as local days, with chart bars: days for a week or month, months for a year.
+export function sharePeriod(period, now = new Date()) {
+  const today = new Date(now)
+  today.setHours(12, 0, 0, 0)
+  const start = new Date(today)
+  if (period === 'week') start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+  else if (period === 'month') start.setDate(1)
+  else start.setMonth(0, 1)
+  const year = today.getFullYear()
+  const name = {
+    week: 'This week',
+    month: fmt(today, { month: 'long' }),
+    year: String(year),
+  }[period]
+  const slots =
+    period === 'year'
+      ? Array.from({ length: 12 }, (_, m) => ({ key: `${year}-${String(m + 1).padStart(2, '0')}`, current: m === today.getMonth() }))
+      : Array.from({ length: period === 'week' ? 7 : new Date(year, today.getMonth() + 1, 0).getDate() }, (_, i) => {
+          const key = localDay(new Date(start.getTime() + i * DAY_MS))
+          return { key, current: key === localDay(today) }
+        })
+  return {
+    from: localDay(start),
+    to: localDay(today),
+    name,
+    chartLabel: period === 'year' ? 'PAGES PER MONTH' : 'PAGES PER DAY',
+    // A day key falls in a month slot by its YYYY-MM prefix.
+    slotOf: (day) => (period === 'year' ? day.slice(0, 7) : day),
+    slots,
+  }
+}
+
 function StatsShare({ summary, activity, books, onClose }) {
-  const year = new Date().getFullYear()
+  const [period, setPeriod] = useState('year')
+  const p = sharePeriod(period)
+  const inPeriod = (day) => day >= p.from && day <= p.to
   const shown = new Map(books.map((b) => [b.document, b]))
   const finished = activity.books
-    .filter((b) => b.finished_at && shown.has(b.document))
+    .filter((b) => b.finished_at && shown.has(b.document) && inPeriod(localDay(new Date(b.finished_at * 1000))))
     .sort((a, b) => b.finished_at - a.finished_at)
-  const thisYear = finished.filter((b) => new Date(b.finished_at * 1000).getFullYear() === year)
-  const pages = activity.books.filter((b) => shown.has(b.document)).reduce((n, b) => n + (b.pages_read ?? 0), 0)
-  const hasTime = summary?.devices?.length > 0
+  const days = activity.days.filter((d) => inPeriod(d.day))
+  const pages = Math.round(days.reduce((n, d) => n + d.pages, 0))
+  // Books read in the period, newest first, for covers and moods when nothing was finished.
+  const read = [...new Set(days.slice().reverse().flatMap((d) => (d.books ?? []).map((b) => b.document)))].filter((d) => shown.has(d))
+  const daily = summary?.daily ?? []
+  const seconds = daily.filter((d) => inPeriod(d.date)).reduce((n, d) => n + d.seconds, 0)
   const tiles = [
-    [`finished in ${year}`, thisYear.length],
+    [period === 'week' ? 'finished this week' : `finished in ${p.name}`, finished.length],
     ['pages read', pages.toLocaleString()],
-    ...(hasTime
+    ...(daily.length
       ? [
-          ['hours read', Math.round(summary.seconds / 3600).toLocaleString()],
-          ['day streak', summary.current_streak],
+          ['hours read', Math.round(seconds / 3600).toLocaleString()],
+          ['day streak', readingStreak(summary, activity)],
         ]
-      : [['reading now', books.filter((b) => b.status === 'reading').length]]),
+      : [['days read', days.filter((d) => d.pages > 0).length]]),
   ]
-  const covers = finished.map((b) => shown.get(b.document).cover_url).filter(Boolean)
-  // This year's moods: books finished this year, else anything read this year.
-  const readThisYear = activity.books.filter((b) => new Date(b.last_at * 1000).getFullYear() === year)
-  const moods = topMoods(books, (thisYear.length ? thisYear : readThisYear).map((b) => b.document))
+  const coverDocs = [...new Set([...finished.map((b) => b.document), ...read])]
+  const covers = coverDocs.map((d) => shown.get(d).cover_url).filter(Boolean)
+  const moods = topMoods(books, finished.length ? finished.map((b) => b.document) : read)
+  const totals = new Map()
+  for (const d of days) totals.set(p.slotOf(d.day), (totals.get(p.slotOf(d.day)) ?? 0) + d.pages)
+  const chart = { label: p.chartLabel, bars: p.slots.map((s) => ({ pages: totals.get(s.key) ?? 0, current: s.current })) }
+  const heading = `${p.name} in books`
+  const mine = period === 'week' ? 'My week in books' : `My ${p.name} in books`
   const meta = {
-    title: `${year} in books`,
-    postTitle: `My ${year} in books`,
-    fileName: `${year} in books.png`,
-    text: `My ${year} in books: ${thisYear.length} finished, ${pages.toLocaleString()} pages read. Tracked with CrossPoint Sync.`,
+    title: heading,
+    postTitle: mine,
+    fileName: `${heading}.png`,
+    text: `${mine}: ${finished.length} finished, ${pages.toLocaleString()} pages read. Tracked with CrossPoint Sync.`,
   }
   return (
     <ShareSheet
       heading="Share your stats"
       meta={meta}
-      renderKey={`${year}-${pages}-${thisYear.length}-${moods.join()}`}
+      renderKey={`${period}-${p.to}-${pages}-${finished.length}-${seconds}-${readingStreak(summary, activity)}-${moods.join()}`}
       onClose={onClose}
-      render={() => renderStatsCard({ heading: `${year} in books`, tiles, covers, weeks: weeklyPages(activity.days), moods })}
-    />
+      render={() => renderStatsCard({ heading, tiles, covers, chart, moods })}
+    >
+      <div className="mt-4 grid grid-cols-3 gap-1 rounded-xl bg-stone-200/60 p-1" role="radiogroup" aria-label="Period">
+        {PERIODS.map(([v, label]) => (
+          <button
+            key={v}
+            type="button"
+            role="radio"
+            aria-checked={period === v}
+            onClick={() => setPeriod(v)}
+            className={`h-9 rounded-lg text-sm font-semibold transition ${period === v ? 'bg-raised text-stone-900 shadow-sm' : 'text-stone-500 active:bg-stone-200'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </ShareSheet>
   )
 }
 
@@ -652,7 +736,7 @@ const shortDate = (d) =>
 function dayEvent(entry, act, day) {
   const on = (unix) => unix && localDay(new Date(unix * 1000)) === day
   if (on(act?.finished_at)) return { icon: CircleCheck, text: 'Finished' }
-  if (on(act?.started_at) && entry.from <= 0.02) return { icon: BookOpen, text: 'Started reading' }
+  if (entry.started || (on(act?.started_at) && entry.from <= 0.02)) return { icon: BookOpen, text: 'Started reading' }
   const span = entry.to > entry.from ? `${pct(entry.from)} to ${pct(entry.to)}` : `at ${pct(entry.to)}`
   if (entry.pages > 0) return { icon: BookOpen, text: `Read ${entry.pages} page${entry.pages === 1 ? '' : 's'} · ${span}` }
   return { icon: BookOpen, text: entry.to > entry.from ? `Read ${span}` : `Opened ${span}` }
@@ -670,8 +754,25 @@ function Timeline({ session, activity, books }) {
   const byDoc = new Map(books.map((b) => [b.document, b]))
   const acts = new Map(activity.books.map((b) => [b.document, b]))
   const reading = books.filter((b) => b.status === 'reading').sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  // The first uploaded position is only a baseline. A chosen start date supplies
+  // its timeline event; keep later opens and any actual movement on their days.
+  const firstSyncDays = new Map()
+  for (const d of activity.days) {
+    for (const b of d.books ?? []) {
+      if (b.syncs > 0 && (!firstSyncDays.has(b.document) || d.day < firstSyncDays.get(b.document))) {
+        firstSyncDays.set(b.document, d.day)
+      }
+    }
+  }
+  const startDays = new Map(activity.days.flatMap((d) => (d.books ?? []).filter((b) => b.started).map((b) => [b.document, d.day])))
   const days = activity.days
-    .map((d) => ({ ...d, books: (d.books ?? []).filter((b) => byDoc.has(b.document) && !idleAfterFinish(b, acts.get(b.document), d.day)) }))
+    .map((d) => ({ ...d, books: (d.books ?? []).filter((b) => {
+      const act = acts.get(b.document)
+      const initialUpload = startDays.has(b.document) && firstSyncDays.get(b.document) === d.day &&
+        startDays.get(b.document) !== d.day && b.pages <= 0 && b.to <= b.from &&
+        localDay(new Date((act?.finished_at ?? 0) * 1000)) !== d.day
+      return byDoc.has(b.document) && !initialUpload && !idleAfterFinish(b, act, d.day)
+    }) }))
     .filter((d) => d.books.length)
     .reverse()
 
@@ -758,21 +859,36 @@ function Timeline({ session, activity, books }) {
   )
 }
 
-export default function Stats({ session, tab = '', summary, activity, books }) {
+export default function Stats({ session, tab = '', summary, activity, books, activityError, activityLoading, activityUpdatedAt, onRetryActivity }) {
   const hasTime = summary?.devices?.length > 0
+  // Reveal daily tiles and calendar time labels together after any history, even a zero counter.
+  const daily = summary?.daily?.length ? dailyReading(summary.daily) : null
   const [sharing, setSharing] = useState(false)
   const header = (
     <>
       <Eyebrow className="md:hidden">Reading stats</Eyebrow>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
       <StatsTabs tab={tab} />
+      {activityError && (
+        <div role={activity ? 'status' : 'alert'} className="mt-4 flex items-center gap-3 rounded-lg bg-surface px-3 py-1 text-xs text-stone-500 ring-1 ring-stone-950/10">
+          <p className="min-w-0 flex-1">{activity
+            ? activityUpdatedAt
+              ? <>Showing data from <time dateTime={new Date(activityUpdatedAt).toISOString()}>{new Date(activityUpdatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</time>.</>
+              : 'Showing saved activity.'
+            : 'Reading activity is unavailable.'}</p>
+          <button type="button" onClick={onRetryActivity} disabled={activityLoading}
+            className="min-h-11 shrink-0 rounded-md px-2 font-semibold text-brand-600 disabled:opacity-50">
+            {activityLoading ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
     </>
   )
   if (tab === 'timeline') {
     return (
       <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
         {header}
-        {activity ? <Timeline session={session} activity={activity} books={books} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
+        {activity ? <Timeline session={session} activity={activity} books={books} /> : !activityError && <p className="py-6 text-sm text-stone-500">Loading…</p>}
       </div>
     )
   }
@@ -782,7 +898,7 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
       {sharing && <StatsShare summary={summary} activity={activity} books={books} onClose={() => setSharing(false)} />}
 
       <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
-      {activity ? <PagesAndBooks activity={activity} books={books} onShare={() => setSharing(true)} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
+      {activity ? <PagesAndBooks activity={activity} books={books} onShare={() => setSharing(true)} /> : !activityError && <p className="py-6 text-sm text-stone-500">Loading…</p>}
       <WhatYouRead books={books} />
 
       {hasTime ? (
@@ -790,15 +906,21 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
           <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">Reading time</h2>
           <Tiles
             tiles={[
-              ['Current streak', `${summary.current_streak} days`],
-              ['Longest streak', `${summary.streak} days`],
+              ['Current streak', `${readingStreak(summary, activity)} days`],
+              ['Longest streak', `${longestReadingStreak(summary, activity)} days`],
+              ...(daily
+                ? [
+                    ['Today', duration(daily.today)],
+                    ['7-day average', duration(daily.average)],
+                  ]
+                : []),
               ['Time read', duration(summary.seconds)],
               ['Pages turned', summary.pages.toLocaleString()],
               ['Sessions', summary.sessions.toLocaleString()],
               ['Books finished', summary.completed],
             ]}
           />
-          <Heatmap summary={summary} activity={activity} />
+          <ReadingCalendar byDay={timeByDay(summary, activity)} view={daily ? TIME_VIEW : DAYS_VIEW} days={activity?.days} books={books} />
           <div className="md:grid md:grid-cols-2 md:gap-4">
             <Bars title="Time of day" labels={['Morning', 'Afternoon', 'Evening', 'Night']} values={summary.tod} />
             <Bars title="Day of week" labels={['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']} values={summary.dow} />
@@ -808,7 +930,9 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
           </p>
         </>
       ) : (
-        activity && <ReadingCalendar days={activity.days} readingDays={activity.reading_days} books={books} />
+        activity && (
+          <ReadingCalendar byDay={pagesByDay(activity.days, activity.reading_days)} view={PAGES_VIEW} days={activity.days} books={books} />
+        )
       )}
     </div>
   )

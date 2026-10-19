@@ -3,7 +3,9 @@ import type { DB } from "../db/db.js";
 import { nowSeconds } from "../models/sync.js";
 import {
   SAVE_CREDENTIAL,
+  type Connector,
   type Credential,
+  type DataKind,
   type DocumentMeta,
   type Match,
   type SavableCredential,
@@ -100,6 +102,33 @@ export function setAccountStatus(
   db.prepare(
     "UPDATE connector_accounts SET status = ?, last_error = ?, updated_at = ? WHERE user_id = ? AND connector_id = ?",
   ).run(status, error, now, userId, connectorId);
+}
+
+export type OptionValues = Record<string, boolean | string>;
+
+/** This user's options for a connector: what they set, over the connector's defaults. */
+export function connectorOptions(db: DB, userId: number, conn: Connector): OptionValues {
+  const row = db.prepare('SELECT options FROM connector_accounts WHERE user_id = ? AND connector_id = ?')
+    .get(userId, conn.id) as { options: string | null } | undefined;
+  let saved: OptionValues = {};
+  try {
+    saved = row?.options ? (JSON.parse(row.options) as OptionValues) : {};
+  } catch {
+    saved = {};
+  }
+  return Object.fromEntries((conn.options ?? []).map((o) => [o.key, saved[o.key] ?? o.default]));
+}
+
+export function setConnectorOptions(db: DB, userId: number, connectorId: string, options: OptionValues, now = nowSeconds()): void {
+  db.prepare('UPDATE connector_accounts SET options = ?, updated_at = ? WHERE user_id = ? AND connector_id = ?')
+    .run(JSON.stringify(options), now, userId, connectorId);
+}
+
+/** Whether this connector should get `kind` events for this user: it carries them and no option turned them off. */
+export function carriesFor(db: DB, userId: number, conn: Connector, kind: DataKind): boolean {
+  if (!conn.carries.includes(kind)) return false;
+  const gate = conn.options?.find((o) => o.gates === kind);
+  return !gate || connectorOptions(db, userId, conn)[gate.key] === true;
 }
 
 /** All connector accounts that are linked, enabled, and healthy for fan-out. */

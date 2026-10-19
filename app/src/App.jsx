@@ -316,14 +316,17 @@ function Home({ session, onSession, onLogout, theme }) {
   // Start from the saved copies so launch paints the library at once, then refresh.
   const [books, error, reloadBooks, booksLoading] = useLoad(() => api.books(session), [session], undefined, () => cached.books(session))
   const [summary, , reloadSummary] = useLoad(() => api.summary(session), [session], undefined, () => cached.summary(session))
-  const [activity, , reloadActivity] = useLoad(() => api.activity(session), [session], undefined, () => cached.activity(session))
+  const [activity, activityError, reloadActivity, activityLoading, activityUpdatedAt] = useLoad(
+    () => api.activity(session), [session], undefined, () => cached.activity(session),
+    { retries: 2, reportRefreshErrors: true, initialUpdatedAt: () => cached.activityUpdatedAt(session) }
+  )
   useEffect(() => {
     updateWidget({ books, summary, activity })
   }, [books, summary, activity])
 
   useEffect(() => {
-    if (error?.status === 401) onLogout()
-  }, [error, onLogout])
+    if (error?.status === 401 || activityError?.status === 401) onLogout()
+  }, [error, activityError, onLogout])
   useEffect(() => {
     const on = () => {
       if (document.visibilityState === 'visible') {
@@ -343,7 +346,10 @@ function Home({ session, onSession, onLogout, theme }) {
   else if (error) page = <ErrorNote error={error} />
   else if (!books) page = <PageSkeleton route={route} />
   else if (route === 'clippings') page = <Clippings session={session} books={books} />
-  else if (route === 'stats') page = <Stats session={session} tab={id} summary={summary} activity={activity} books={books} />
+  else if (route === 'stats') page = (
+    <Stats session={session} tab={id} summary={summary} activity={activity} books={books}
+      activityError={activityError} activityLoading={activityLoading} activityUpdatedAt={activityUpdatedAt} onRetryActivity={reloadActivity} />
+  )
   else if (route === 'book') page = (
       <Book
         session={session}

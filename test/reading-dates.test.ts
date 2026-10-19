@@ -56,6 +56,23 @@ describe('PUT /api/v1/documents/:document/dates', () => {
     expect(await activity()).toMatchObject({ start_manual: true, finish_manual: false, started_at: day('2026-08-11') + 16 * 3600 });
   });
 
+  it('moves the timeline start after manual edits without CrossInk dates, and removes it on clearing', async () => {
+    const { dates, app, headers } = await setup();
+    const starts = async () => {
+      const res = await app.request('/api/v1/stats/activity?tz=240', { headers });
+      const data = await res.json();
+      return data.days.filter((d: { books: { started?: boolean }[] }) => d.books.some((b) => b.started))
+        .map((d: { day: string }) => d.day);
+    };
+    expect(await starts()).toEqual([]);
+    await dates({ start_date: '2026-08-11' });
+    expect(await starts()).toEqual(['2026-08-11']);
+    await dates({ start_date: '2026-08-16' });
+    expect(await starts()).toEqual(['2026-08-16']);
+    await dates({ start_date: null });
+    expect(await starts()).toEqual([]);
+  });
+
   it('recalculates the grid after edits and clearing, without filling a date range', async () => {
     const { dates, grid, app, headers } = await setup();
     const syncedDays = await grid();

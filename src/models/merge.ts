@@ -1,4 +1,7 @@
 import { withTransaction, type DB } from '../db/db.js';
+import { nextChangeSeq } from './changes.js';
+import { md5Hex } from '../auth/password.js';
+import { autoUnpause } from './pause.js';
 
 /**
  * Manual document merges. The kosync document key is client-computed and
@@ -14,6 +17,34 @@ export function resolveDocument(db: DB, userId: number, document: string): strin
     .prepare('SELECT document FROM document_aliases WHERE user_id = ? AND alias = ?')
     .get(userId, document) as { document: string } | undefined;
   return row?.document ?? document;
+}
+
+/**
+ * A reader's two keys for one book are MD5(filename) and the binary partial-MD5,
+ * and smart sync reads the other key's record but uploads under its own. A first
+ * push under an unknown key that is a known book's filename hash (or whose
+ * filename hashes to a known book) is aliased to that book instead of starting a
+ * duplicate. Returns the document to write under.
+ */
+export function adoptFilenameTwin(db: DB, userId: number, document: string, filename: string | null, now: number): string {
+  const resolved = resolveDocument(db, userId, document);
+  const hasProgress = (doc: string) =>
+    db.prepare('SELECT 1 FROM progress WHERE user_id = ? AND document = ? LIMIT 1').get(userId, doc) !== undefined;
+  if (resolved !== document || hasProgress(document)) return resolved;
+  let twin: string | undefined;
+  const named = filename ? resolveDocument(db, userId, md5Hex(filename)) : undefined;
+  if (named && named !== document && hasProgress(named)) twin = named;
+  else {
+    const rows = db
+      .prepare('SELECT document, filename FROM documents WHERE user_id = ? AND filename IS NOT NULL')
+      .all(userId) as unknown as { document: string; filename: string }[];
+    twin = rows.find((r) => md5Hex(r.filename) === document && hasProgress(r.document))?.document;
+  }
+  if (!twin) return document;
+  db.prepare(
+    'INSERT INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, 1)'
+  ).run(userId, document, twin, now);
+  return twin;
 }
 
 /** All alias hashes per canonical document for a user. */
@@ -90,6 +121,15 @@ export function mergeDocuments(
          SELECT rowid FROM progress WHERE user_id = ? AND document = ?
          ORDER BY percentage DESC, updated_at DESC LIMIT 1)`
     ).run(now, userId, into, userId, into);
+    // The merge bypasses upsertProgress, so stamp the canonical rows itself;
+    // otherwise devices never see the merged position until the next write.
+    const seq = nextChangeSeq(db);
+    db.prepare('UPDATE progress SET change_seq = ?, server_change_seq = ? WHERE user_id = ? AND document = ?').run(
+      seq,
+      seq,
+      userId,
+      into
+    );
 
     // progress_samples PK (user, document, pct_bucket): newest sample per bucket.
     db.prepare(
@@ -125,6 +165,9 @@ export function mergeDocuments(
          updated_at = excluded.updated_at`
     ).run(into, now, userId, from);
     db.prepare('DELETE FROM documents WHERE user_id = ? AND document = ?').run(userId, from);
+    // A pause carried over from either side gives way to progress made since.
+    const last = db.prepare('SELECT MAX(at) AS at FROM progress_log WHERE user_id = ? AND document = ?').get(userId, into) as { at: number | null };
+    if (last.at !== null) autoUnpause(db, userId, into, last.at);
 
     // Uniquely-keyed side tables: move what fits, drop the (rare) conflicts.
     for (const table of ['bookmarks', 'clippings', 'connector_matches', 'connector_queue']) {
