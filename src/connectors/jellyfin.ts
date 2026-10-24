@@ -69,19 +69,6 @@ const sessions = new Map<string, Session>();
 // Keyed by the password too, so a cached token is only reused with the credential that earned it.
 const sessionKey = (c: JellyfinCred) => createHash('sha256').update(`${deviceId(c)}\n${c.password}`).digest('hex');
 
-function versionAtLeast(version: string, major: number, minor: number, patch: number): boolean {
-  const core = (version.trim().split(/[-+~]/)[0] ?? '').split('.');
-  const m = Number.parseInt(core[0] ?? '', 10);
-  const n = Number.parseInt(core[1] ?? '', 10);
-  const p = Number.parseInt(core[2] ?? '', 10);
-  const maj = Number.isFinite(m) ? m : 0;
-  const min = Number.isFinite(n) ? n : 0;
-  const pat = Number.isFinite(p) ? p : 0;
-  if (maj !== major) return maj > major;
-  if (min !== minor) return min > minor;
-  return pat >= patch;
-}
-
 async function login(http: HttpTransport, c: JellyfinCred): Promise<Session> {
   const key = sessionKey(c);
   const cached = sessions.get(key);
@@ -116,11 +103,7 @@ async function login(http: HttpTransport, c: JellyfinCred): Promise<Session> {
   if (!accessToken || !userId) throw new ConnectorOperationError('Jellyfin returned no session', false);
   const session = { accessToken, userId };
   sessions.set(key, session);
-  while (sessions.size > MAX_SESSIONS) {
-    const oldest = sessions.keys().next().value;
-    if (oldest === undefined) break;
-    sessions.delete(oldest);
-  }
+  if (sessions.size > MAX_SESSIONS) sessions.delete(sessions.keys().next().value!);
   return session;
 }
 
@@ -147,7 +130,6 @@ async function getJson(http: HttpTransport, c: JellyfinCred, path: string): Prom
   if (res.status === 401) {
     throw new ConnectorOperationError('Jellyfin session expired', false, true);
   }
-  if (res.status === 403) return null;
   if (res.status < 200 || res.status >= 300) return null;
   try {
     return await res.json();
@@ -210,48 +192,34 @@ function itemsFromQuery(body: unknown): Record<string, unknown>[] {
 
 async function validate(cred: Credential, http: HttpTransport): Promise<ValidateResult> {
   const c = parseCred(cred);
-  if (!c)
-    return {
-      ok: false,
-      error: 'server URL, username and password are required',
-    };
+  if (!c) return { ok: false, error: 'server URL, username and password are required' };
   try {
     sessions.delete(sessionKey(c));
     await login(http, c);
     const info = await getJson(http, c, '/System/Info');
-    const version = typeof info?.Version === 'string' ? info.Version : '';
-    if (!versionAtLeast(version, 12, 0, 0)) {
-      return { ok: false, error: 'Requires Jellyfin 12.0 or newer' };
-    }
+    if (!(Number.parseInt(String(info?.Version), 10) >= 12)) return { ok: false, error: 'Requires Jellyfin 12.0 or newer' };
     return { ok: true, accountLabel: `${c.username} @ ${c.server}` };
   } catch (err) {
-    if (err instanceof ConnectorOperationError && err.needsReauth) {
-      return { ok: false, error: err.message };
-    }
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
-async function searchBooks(
-  http: HttpTransport,
-  c: JellyfinCred,
-  query: string
-): Promise<(Candidate & { runTimeTicks?: number })[]> {
-  const { userId } = await login(http, c);
-  const q = encodeURIComponent(query);
-  const path = `/Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Book&SearchTerm=${q}&Fields=People,RunTimeTicks&Limit=25`;
-  const body = await getJson(http, c, path);
-  const out: (Candidate & { runTimeTicks?: number })[] = [];
+/** Books in a Jellyfin item query; `edition` carries RunTimeTicks for the progress maths. */
+function toBooks(body: unknown): ExternalBook[] {
+  const out: ExternalBook[] = [];
   for (const item of itemsFromQuery(body)) {
     const cand = itemToCandidate(item);
     if (!cand) continue;
     const rt = item.RunTimeTicks;
-    out.push(typeof rt === 'number' && rt > 0 ? { ...cand, runTimeTicks: rt } : cand);
+    out.push({ ...cand, author: cand.author ?? null, edition: typeof rt === 'number' && rt > 0 ? String(rt) : null });
   }
   return out;
+}
+
+async function searchBooks(http: HttpTransport, c: JellyfinCred, query: string): Promise<ExternalBook[]> {
+  const { userId } = await login(http, c);
+  const q = encodeURIComponent(query);
+  return toBooks(await getJson(http, c, `/Users/${encodeURIComponent(userId)}/Items?Recursive=true&IncludeItemTypes=Book&SearchTerm=${q}&Fields=People,RunTimeTicks&Limit=25`));
 }
 
 async function match(cred: Credential, doc: DocumentMeta, http: HttpTransport): Promise<Match | null> {
@@ -259,14 +227,14 @@ async function match(cred: Credential, doc: DocumentMeta, http: HttpTransport): 
   if (!c) return null;
   const ta = extractTitleAuthor(doc);
   if (!ta) return null;
-  const candidates = await searchBooks(http, c, ta.title.trim());
-  if (candidates.length === 0) return null;
-  const decision = decideMatch(ta.title, ta.author, candidates);
+  const books = await searchBooks(http, c, ta.title.trim());
+  if (books.length === 0) return null;
+  const decision = decideMatch(ta.title, ta.author, books);
   if (!decision.accepted || !decision.best) return null;
-  const chosen = candidates.find((x) => x.externalId === decision.best!.externalId);
+  const chosen = books.find((x) => x.externalId === decision.best!.externalId);
   return {
     externalId: decision.best.externalId,
-    externalEdition: chosen?.runTimeTicks != null ? String(chosen.runTimeTicks) : null,
+    externalEdition: chosen?.edition ?? null,
     confidence: decision.best.score,
     queryUsed: ta.title.trim(),
     title: chosen?.title ?? null,
@@ -277,34 +245,13 @@ async function match(cred: Credential, doc: DocumentMeta, http: HttpTransport): 
 async function listCurrentlyReading(cred: Credential, http: HttpTransport): Promise<ExternalBook[]> {
   const c = parseCred(cred);
   if (!c) return [];
-  const session = await login(http, c);
-  const path = `/UserItems/Resume?UserId=${encodeURIComponent(session.userId)}&IncludeItemTypes=Book&Fields=People,RunTimeTicks&Limit=50`;
-  const body = await getJson(http, c, path);
-  const out: ExternalBook[] = [];
-  for (const item of itemsFromQuery(body)) {
-    const cand = itemToCandidate(item);
-    if (!cand) continue;
-    const rt = item.RunTimeTicks;
-    out.push({
-      externalId: cand.externalId,
-      title: cand.title,
-      author: cand.author ?? null,
-      edition: typeof rt === 'number' && rt > 0 ? String(rt) : null,
-    });
-  }
-  return out;
+  const { userId } = await login(http, c);
+  return toBooks(await getJson(http, c, `/UserItems/Resume?UserId=${encodeURIComponent(userId)}&IncludeItemTypes=Book&Fields=People,RunTimeTicks&Limit=50`));
 }
 
 async function search(cred: Credential, query: string, http: HttpTransport): Promise<ExternalBook[]> {
   const c = parseCred(cred);
-  if (!c || !query.trim()) return [];
-  const candidates = await searchBooks(http, c, query.trim());
-  return candidates.map((cand) => ({
-    externalId: cand.externalId,
-    title: cand.title,
-    author: cand.author ?? null,
-    edition: cand.runTimeTicks != null ? String(cand.runTimeTicks) : null,
-  }));
+  return c && query.trim() ? searchBooks(http, c, query.trim()) : [];
 }
 
 async function fetchRunTimeTicks(
@@ -364,92 +311,39 @@ async function pullProgress(
   return change;
 }
 
+function failure(status: number): PushResult {
+  if (status === 401) return { ok: false, retryable: false, needsReauth: true, error: 'unauthorized' };
+  if (status === 403) return { ok: false, retryable: false, error: 'forbidden' };
+  if (status === 429) return { ok: false, retryable: true, error: 'rate limited' };
+  if (status >= 500) return { ok: false, retryable: true, error: `server ${status}` };
+  return { ok: false, retryable: false, error: `unexpected status ${status}` };
+}
+
 async function push(cred: Credential, m: Match, ev: OutboundEvent, http: HttpTransport): Promise<PushResult> {
   const c = parseCred(cred);
-  if (!c)
-    return {
-      ok: false,
-      retryable: false,
-      needsReauth: true,
-      error: 'bad credential',
-    };
+  if (!c) return { ok: false, retryable: false, needsReauth: true, error: 'bad credential' };
   const session = await login(http, c);
   const itemPath = `/Users/${encodeURIComponent(session.userId)}/Items/${encodeURIComponent(m.externalId)}`;
 
-  const getRes = await call(http, c, 'GET', `${itemPath}/UserData`);
-  if (getRes.res.status === 401) {
-    return {
-      ok: false,
-      retryable: false,
-      needsReauth: true,
-      error: 'unauthorized',
-    };
-  }
-  if (getRes.res.status === 403) {
-    return {
-      ok: false,
-      retryable: false,
-      error: 'forbidden',
-    };
-  }
-  let remote: Record<string, unknown> | null = null;
-  if (getRes.res.status >= 200 && getRes.res.status < 300) {
-    try {
-      remote = (await getRes.res.json()) as Record<string, unknown>;
-    } catch {
-      remote = null;
-    }
-  }
-  const remoteLast = remote?.LastPlayedDate;
-  if (typeof remoteLast === 'string' && remoteLast) {
-    const remoteMs = Date.parse(remoteLast);
-    if (Number.isFinite(remoteMs) && remoteMs > ev.timestamp * 1000) {
-      return { ok: true };
-    }
-  }
+  // Don't replace a position read more recently in Jellyfin.
+  const { res: current } = await call(http, c, 'GET', `${itemPath}/UserData`);
+  if (current.status === 401 || current.status === 403) return failure(current.status);
+  const remote: any = current.status >= 200 && current.status < 300 ? await current.json().catch(() => null) : null;
+  const remoteMs = typeof remote?.LastPlayedDate === 'string' ? Date.parse(remote.LastPlayedDate) : NaN;
+  if (Number.isFinite(remoteMs) && remoteMs > ev.timestamp * 1000) return { ok: true };
 
   const pct = Math.max(0, Math.min(1, ev.percentage ?? 0));
   const finished = ev.kind === 'finished' || pct >= 0.999;
   const runTimeTicks = await resolveRunTimeTicks(http, c, session, m);
-  const playedPct = finished ? 100 : pct * 100;
   const payload: Record<string, unknown> = {
-    PlayedPercentage: playedPct,
+    PlayedPercentage: finished ? 100 : pct * 100,
     Played: finished,
     LastPlayedDate: new Date(ev.timestamp * 1000).toISOString(),
   };
-  if (runTimeTicks) {
-    payload.PlaybackPositionTicks = Math.round((finished ? 1 : pct) * runTimeTicks);
-  }
+  if (runTimeTicks) payload.PlaybackPositionTicks = Math.round((finished ? 1 : pct) * runTimeTicks);
 
-  const postRes = await call(http, c, 'POST', `${itemPath}/UserData`, payload);
-  if (postRes.res.status === 401) {
-    return {
-      ok: false,
-      retryable: false,
-      needsReauth: true,
-      error: 'unauthorized',
-    };
-  }
-  if (postRes.res.status === 403) {
-    return {
-      ok: false,
-      retryable: false,
-      error: 'forbidden',
-    };
-  }
-  if (postRes.res.status === 429) return { ok: false, retryable: true, error: 'rate limited' };
-  if (postRes.res.status >= 500)
-    return {
-      ok: false,
-      retryable: true,
-      error: `server ${postRes.res.status}`,
-    };
-  if (postRes.res.status >= 200 && postRes.res.status < 300) return { ok: true };
-  return {
-    ok: false,
-    retryable: false,
-    error: `unexpected status ${postRes.res.status}`,
-  };
+  const { res } = await call(http, c, 'POST', `${itemPath}/UserData`, payload);
+  return res.status >= 200 && res.status < 300 ? { ok: true } : failure(res.status);
 }
 
 export const jellyfinConnector: Connector = {

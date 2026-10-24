@@ -67,9 +67,7 @@ interface SeekquelCred extends Credential {
 
 /** Seekquel's API origin. SEEKQUEL_URL points a test install at a local Seekquel. */
 export function seekquelBase(env: NodeJS.ProcessEnv = process.env): string {
-  let url = env.SEEKQUEL_URL?.trim() || DEFAULT_BASE;
-  while (url.endsWith('/')) url = url.slice(0, -1);
-  return url;
+  return (env.SEEKQUEL_URL?.trim() || DEFAULT_BASE).replace(/\/+$/, '');
 }
 
 function parseCred(cred: Credential): SeekquelCred | null {

@@ -2,7 +2,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { DB } from './db/db.js';
-import { normalizeBasePath, type Config } from './config.js';
+import type { Config } from './config.js';
 import { sessionOrKeyAuth, type AppEnv } from './auth/middleware.js';
 import { kosyncRoutes } from './routes/kosync.js';
 import { meRoutes } from './routes/v1/me.js';
@@ -28,7 +28,6 @@ export interface AppOptions {
 }
 
 export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<AppEnv> {
-  config = { ...config, basePath: normalizeBasePath(config.basePath) };
   const { basePath } = config;
   const app = new Hono<AppEnv>();
   const refreshProgress = createProgressRefresh(db, opts.connectorTransport);
