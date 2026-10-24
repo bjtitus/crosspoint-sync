@@ -52,4 +52,25 @@ describe('manual genres', () => {
     await put({ page_count: 500 });
     expect(await listed()).toEqual(['Heist']);
   });
+
+  it('keeps manual genres through a merge, over Hardcover\'s', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const OTHER = 'ffffffffffffffffffffffffffffffff';
+    for (const document of [DOC, OTHER]) {
+      await app.request('/syncs/progress', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ document, progress: '/body/DocFragment[2]', percentage: 0.2, device: 'X4', device_id: 'x4',
+          metadata: { title: 'Foundryside', authors: 'Robert Jackson Bennett' } }),
+      });
+    }
+    // The kept book only has Hardcover's genres; the merged-away one has some set by hand.
+    db.prepare('UPDATE documents SET genres = ? WHERE document = ?').run('["Fantasy"]', DOC);
+    await app.request(`/api/v1/documents/${OTHER}/info`, { method: 'PUT', headers, body: JSON.stringify({ genres: ['Heist'] }) });
+
+    const merge = await app.request('/api/v1/documents/merge', { method: 'POST', headers, body: JSON.stringify({ document: OTHER, into: DOC }) });
+    expect(merge.status).toBe(200);
+    expect(db.prepare('SELECT genres, genres_manual FROM documents WHERE document = ?').get(DOC)).toEqual({ genres: '["Heist"]', genres_manual: 1 });
+  });
 });
