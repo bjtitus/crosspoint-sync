@@ -94,6 +94,7 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
     "filename": "Foundryside - Robert Jackson Bennett.epub",
     "title": "Foundryside",
     "authors": "Robert Jackson Bennett",
+    "language": "en",
     "bookfusion_id": "36835"
   }
   ```
@@ -101,6 +102,10 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
   All fields optional strings (≤512 chars). `filename`/`title`/`authors` are stored per
   `(user, document)`; fields the client omits never overwrite previously stored values. Retrieve
   via `GET /api/v1/documents` or joined into `GET /api/v1/progress`.
+
+  **Language.** `language` is the EPUB's `dc:language` as a BCP 47 tag (`"ja"`, `"de-DE"`). It
+  only fills a blank, so a language set by hand through `PUT /api/v1/documents/{document}/info`
+  stays. A value that isn't a language tag is ignored; the sync itself still succeeds.
 
   **Service ids.** Any extra `<service>_id` field (from a CrossPoint plugin's book sidecar,
   e.g. `bookfusion_id`) pre-seeds an exact match for the connector of that name: progress is
@@ -216,6 +221,12 @@ The kosync body plus a `position` object mapping 1:1 to the firmware's `CompactP
 | xpath  | string ≤ 120 bytes, optional | KOReader-style xpath |
 
 Response: `{"document": "...", "timestamp": 1752345678}`.
+
+An optional `timestamp` (unix seconds) says when the position was read, for clients that sync
+later than they read. The stored time, the reading timeline and "newest wins" then use it instead
+of the time of the request. A time in the future is capped at now; a missing one, or one before
+2000, means now. `PUT /syncs/progress` and the batch route always use the time of the request, so
+a reader with an unset clock can't backdate itself.
 
 An invalid `position` is ignored (the kosync fields still sync); a missing `position` on a later
 PUT keeps the previously stored one for that device.
@@ -575,6 +586,25 @@ Server-side aggregate across all of the user's devices:
 }
 ```
 
+#### GET /api/v1/stats/overview?tz=&days=
+
+A small digest for readers that want to show the account's totals on the device. It has the same numbers
+the Stats page shows, from every source: syncs, chosen start and finish dates, and device stats.
+
+```json
+{"anchor_day": 9793, "days": 365, "history_b64": "...", "reading_days": 53,
+ "current_streak": 2, "longest_streak": 6, "books_finished": 496, "finished_this_year": 31,
+ "pages_read": 142177, "seconds": 2880, "sessions": 0, "today_seconds": 420, "week_seconds": 2880}
+```
+
+- `tz` is the caller's UTC offset in minutes as JS `getTimezoneOffset()` gives it. It decides what "today" and "this year" are.
+- `anchor_day` is today, as days since 2000-01-01. In `history_b64`, bit N (LSB-first per byte) is set when day
+  `anchor_day - N` was a reading day. The bitmap covers the last `days` days (default 365, at most 3650), so
+  the response stays a few hundred bytes.
+- All the counts cover the whole history, whatever `days` is: `reading_days`, the streaks, the finished counts and the pages.
+  The time fields come from device stats: `seconds`, `sessions`, `today_seconds`, and `week_seconds` for the
+  last 7 days including today.
+
 #### GET /api/v1/stats/global
 
 Raw per-device snapshots (`{"devices": [{"device_id", "device", "updated_at", "stats": {...}}]}`)
@@ -623,9 +653,12 @@ the server has `GOOGLE_BOOKS_API_KEY`, then Amazon's "Print length" via SearchAP
 
 #### PUT /api/v1/documents/{document}/info
 
-Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433}` (either
-field optional). Manual values stick, since lookups only fill blanks; `null` clears a field so it's
-looked up again. Returns the stored `{document, cover_url, page_count}`.
+Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433,
+"genres": ["Fantasy", "Heist"]}` (every field optional). Manual values stick, since lookups only fill
+blanks and Hardcover's lookup leaves manual genres alone; `null` clears a field so it's looked up
+again. `genres` takes up to 10 names of at most 64 characters. `language` (a BCP 47 tag) can be set
+the same way and then stays over device syncs; `null` clears it so the next device sync fills it
+again. Returns the stored `{document, cover_url, page_count, title, author, language, genres}`.
 
 #### GET /api/v1/documents/{document}/cover/candidates?q=
 

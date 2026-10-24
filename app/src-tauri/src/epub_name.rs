@@ -6,6 +6,7 @@
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::io::{Cursor, Read};
+use unicode_normalization::UnicodeNormalization;
 use zip::ZipArchive;
 
 /// `Title - Author.epub`, or None when the book has no usable title.
@@ -97,7 +98,7 @@ fn title_author(opf: &str) -> Option<(String, String)> {
 
 fn sanitize(value: &str) -> String {
   let cleaned: String = value
-    .chars()
+    .nfc()
     .map(|c| if "<>:\"/\\|?*".contains(c) || c.is_control() { ' ' } else { c })
     .collect();
   cleaned.split_whitespace().collect::<Vec<_>>().join(" ").trim_matches(|c| c == '.' || c == ' ').to_string()
@@ -146,6 +147,14 @@ mod tests {
     </metadata></package>"#;
     // ':' is not filename-safe, same as the firmware's sanitizer.
     assert_eq!(metadata_filename(&epub(opf)).as_deref(), Some("Foundryside A Novel - Robert Jackson Bennett.epub"));
+  }
+
+  #[test]
+  fn normalizes_metadata_before_building_and_truncating_names() {
+    let opf = "<package><metadata><title>Cafe\u{301}</title><creator>\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}</creator></metadata></package>";
+    assert_eq!(metadata_filename(&epub(opf)).as_deref(), Some("Café - 한글.epub"));
+    // Count composed characters so decomposed metadata does not truncate too early.
+    assert_eq!(build_filename(&"e\u{301}".repeat(181), ""), Some(format!("{}.epub", "é".repeat(180))));
   }
 
   #[test]

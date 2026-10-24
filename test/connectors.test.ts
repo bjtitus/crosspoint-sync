@@ -5,6 +5,7 @@ import type { HttpTransport } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import { claimReady, enqueue, markFailed } from '../src/connectors/queue.js';
 import { saveMatch, upsertAccount } from '../src/connectors/store.js';
+import { fromEnv } from '../src/config.js';
 
 // A programmable fake transport. Records requests; returns queued responses by
 // URL substring match.
@@ -210,6 +211,37 @@ describe('connector management API', () => {
 
     expect(res.status).toBe(400);
     expect(fake.calls).toHaveLength(0);
+  });
+
+  it.each([
+    { name: 'unconfigured HTTPS proxy', env: {}, protocol: 'http', forwarded: 'https', status: 400 },
+    { name: 'trusted HTTPS proxy', env: { TRUST_PROXY: 'true' }, protocol: 'http', forwarded: 'https', status: 200 },
+    { name: 'trusted proxy serving HTTP', env: { TRUST_PROXY: 'true' }, protocol: 'http', forwarded: 'http', status: 400 },
+    { name: 'direct HTTPS', env: {}, protocol: 'https', forwarded: '', status: 200 },
+  ])('links BookOrbit securely with $name', async ({ env, protocol, forwarded, status }) => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, { accessToken: 'orbit-token' });
+    fake.on('/auth/me', 200, { username: 'reader' });
+    const { app, db } = makeTestApp(fromEnv(env), { connectorTransport: fake.transport });
+    const { username, headers } = await registerUser(app);
+    const res = await app.request(`${protocol}://sync.example.com/api/v1/connectors/bookorbit`, {
+      method: 'PUT',
+      headers: { ...headers, 'x-forwarded-proto': forwarded },
+      body: JSON.stringify({ credential: { server: 'https://orbit.test', username, password: 'pw' } }),
+    });
+
+    expect(res.status).toBe(status);
+    if (status === 200) {
+      expect(await res.json()).toMatchObject({ id: 'bookorbit', linked: true });
+      expect(fake.calls.some((call) => call.url.endsWith('/auth/login'))).toBe(true);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM connector_accounts').get()).toMatchObject({ n: 1 });
+    } else {
+      const body = await res.json();
+      expect(body.message).toContain('HTTPS to CrossPoint Sync');
+      expect(body.message).toContain('TRUST_PROXY=true');
+      expect(fake.calls).toHaveLength(0);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM connector_accounts').get()).toMatchObject({ n: 0 });
+    }
   });
 
   it('rejects a forged loopback Host from a remote peer', async () => {

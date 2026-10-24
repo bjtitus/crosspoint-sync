@@ -22,8 +22,8 @@ async function fixture() {
     if (url.endsWith('/auth/login')) body = { accessToken: 'token' };
     else if (url.endsWith('/auth/me')) body = { settings: { timezone: 'UTC' } };
     else if (url.includes('/sessions?')) body = { items: [], total: 0, page: 1, pageSize: 100 };
-    else if (url.endsWith('/progress')) body = [{ fileId: 71, percentage: 8.42,
-      koreaderProgress: '/body/DocFragment[17]/body/p[2]', updatedAt: new Date(REMOTE_TIME * 1000).toISOString() }];
+    else if (url.endsWith('/books/files/71/progress')) body = { percentage: 8.42,
+      koreaderProgress: '/body/DocFragment[17]/body/p[2]', updatedAt: new Date(REMOTE_TIME * 1000).toISOString() };
     else if (url.endsWith('/annotations')) body = [];
     else throw new Error(`Unexpected request: ${url}`);
     return { status: 200, json: async () => body, text: async () => JSON.stringify(body) };

@@ -33,7 +33,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const user = c.get('user');
-    const parsed = parseProgressBody(user.id, body);
+    const parsed = parseProgressBody(user.id, body, { clientTime: true });
     if (!parsed.ok) {
       return kosyncError(c, 403, parsed.code, parsed.message);
     }
@@ -90,7 +90,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
     const rows = db
       .prepare(
         `SELECT p.document, p.device_id, p.device, p.percentage, p.progress, p.position, p.updated_at,
-                d.title, d.author, d.filename, d.cover_url, d.page_count,
+                d.title, d.author, d.filename, d.language, d.cover_url, d.page_count,
                 d.hc_slug, d.moods, d.genres, d.content_warnings, d.rating, d.series, d.series_position, d.release_year,
                 COALESCE(d.status, CASE WHEN p.percentage >= 0.98 OR ${completedBookStatsSql('p.user_id', 'p.document')}
                   THEN 'finished' ELSE 'reading' END) AS status,
@@ -121,6 +121,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
       title: string | null;
       author: string | null;
       filename: string | null;
+      language: string | null;
       cover_url: string | null;
       page_count: number | null;
       hc_slug: string | null;
@@ -158,6 +159,7 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
           title: r.title,
           author: r.author,
           filename: r.filename,
+          language: r.language,
           status: r.status,
           // When a manual status was set (null when derived from progress).
           status_at: r.status_at ?? null,

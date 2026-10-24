@@ -638,7 +638,7 @@ describe('bookorbit highlights', () => {
         body: new ReadableStream({ start(controller) { controller.enqueue(epub()); controller.close(); } }),
       };
       if (url.endsWith('/books/12/annotations') && init.method === 'GET') return json(existing);
-      if (url.endsWith('/books/12/progress') && init.method === 'GET') return json([]);
+      if (url.endsWith('/books/files/71/progress') && init.method === 'GET') return json({ percentage: 0, updatedAt: null });
       return json({});
     };
     return { http, calls };
@@ -691,7 +691,7 @@ describe('bookorbit highlights', () => {
     const o = orbit();
     const r = await bookorbitConnector.push(CRED, MATCH, { kind: 'progress', document: 'd', percentage: 0.423712, progress: XPATH, timestamp: 1 }, o.http);
     expect(r.ok).toBe(true);
-    const save = o.calls.find((c) => c.url.endsWith('/books/files/71/progress'))!;
+    const save = o.calls.find((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'))!;
     expect(JSON.parse(save.body!)).toEqual({ percentage: 42.3712, koreaderProgress: XPATH, cfi: (await epubPosition(epub(), XPATH)).cfi });
   });
 
@@ -706,15 +706,15 @@ describe('bookorbit highlights', () => {
     clearBookFusionEpubCache();
     await bookorbitConnector.push(CRED, MATCH, ev, o.http, ctx);
     expect(o.calls.filter((c) => c.url.endsWith('/serve'))).toHaveLength(1);
-    const saves = o.calls.filter((c) => c.url.endsWith('/books/files/71/progress'));
+    const saves = o.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'));
     expect(JSON.parse(saves[1].body!).cfi).toBe((await epubPosition(epub(), XPATH)).cfi);
   });
 
   it('pulls an exact position from the web reader\'s CFI or a KOReader XPath', async () => {
-    const row = (extra: object) => [{ fileId: 71, percentage: 60, updatedAt: '2026-09-02T00:00:00Z', ...extra }];
+    const row = (extra: object) => ({ percentage: 60, updatedAt: '2026-09-02T00:00:00Z', ...extra });
     const pull = (rows: unknown) => {
       const o = orbit();
-      const http: HttpTransport = async (url, init) => url.endsWith('/books/12/progress')
+      const http: HttpTransport = async (url, init) => url.endsWith('/books/files/71/progress')
         ? { status: 200, text: async () => '', json: async () => rows } : o.http(url, init);
       return bookorbitConnector.pullProgress!(CRED, MATCH, http, 0);
     };
@@ -730,8 +730,8 @@ describe('bookorbit highlights', () => {
   it('is pulled when a reader asks for progress', async () => {
     const o = orbit([{ id: 5, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail' }]);
     const cfi = (await epubPosition(epub(), XPATH)).cfi;
-    const http: HttpTransport = async (url, init) => url.endsWith('/books/12/progress')
-      ? { status: 200, text: async () => '', json: async () => [{ fileId: 71, percentage: 60, cfi, updatedAt: new Date().toISOString() }] }
+    const http: HttpTransport = async (url, init) => url.endsWith('/books/files/71/progress')
+      ? { status: 200, text: async () => '', json: async () => ({ percentage: 60, cfi, updatedAt: new Date().toISOString() }) }
       : o.http(url, init);
     const { app, db } = makeTestApp({}, { connectorTransport: http });
     const { headers } = await registerUser(app);

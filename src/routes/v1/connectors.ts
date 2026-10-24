@@ -127,6 +127,10 @@ function loopbackAddress(address: string): boolean {
   return address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.');
 }
 
+export const CREDENTIAL_HTTPS_REQUIRED = 'Connector credentials require HTTPS to CrossPoint Sync. '
+  + 'If HTTPS ends at a reverse proxy, configure TRUST_PROXY=true on the Sync server '
+  + 'and have the proxy send X-Forwarded-Proto: https. Only enable proxy trust when direct access to Sync is blocked.';
+
 export function credentialRequestIsSecure(c: Context<AppEnv>, trustProxy: boolean): boolean {
   const url = new URL(c.req.url);
   if (url.protocol === 'https:') return true;
@@ -218,7 +222,7 @@ export function connectorRoutes(
       return c.json({ code: 2003, message: `Update the CrossPoint Sync app to sign in with ${conn.displayName}.` }, 400);
     }
     if (!credentialRequestIsSecure(c, trustProxy)) {
-      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+      return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
       return c.json(
@@ -253,7 +257,7 @@ export function connectorRoutes(
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.beginLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
     if (!credentialRequestIsSecure(c, trustProxy)) {
-      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+      return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
       return c.json({ code: 2003, message: 'Server has no TOKEN_ENC_KEY; connector storage disabled' }, 403);
@@ -279,7 +283,7 @@ export function connectorRoutes(
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     if (!conn.pollLink) return c.json({ code: 2003, message: 'Connector has no device link' }, 400);
     if (!credentialRequestIsSecure(c, trustProxy)) {
-      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+      return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     let deviceCode: unknown;
     try {
@@ -346,7 +350,7 @@ export function connectorRoutes(
     const clientId = getClientId(db, user.id, conn.id) ?? config.clientId;
     if (!clientId) return c.json({ code: 2003, message: `Add your ${conn.displayName} app's Client ID first.` }, 400);
     if (!credentialRequestIsSecure(c, trustProxy)) {
-      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+      return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
       return c.json({ code: 2003, message: 'Server has no TOKEN_ENC_KEY; connector storage disabled' }, 403);
