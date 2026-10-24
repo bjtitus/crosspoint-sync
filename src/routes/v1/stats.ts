@@ -27,6 +27,40 @@ const MAX_INFO_LOOKUPS = 25;
 const EPOCH_DAY = Date.UTC(2000, 0, 1) / 86400000;
 const DEFAULT_OVERVIEW_DAYS = 365;
 const MAX_OVERVIEW_DAYS = 3650;
+// Genre groups can be many; the overview returns the ones with the most reading days.
+const MAX_OVERVIEW_GROUPS = 20;
+
+interface BookInfo {
+  language: string | null;
+  genres: string[];
+  author: string | null;
+}
+
+interface OverviewTime {
+  seconds: number;
+  sessions: number;
+  perDay: Map<number, number>;
+}
+
+/**
+ * The overview's book filters. `null` for an invalid one; `active` false when none is given. Language
+ * matches by main subtag, genre by name, author by part of the name; all ignore case.
+ */
+function bookFilter(language?: string, genre?: string, author?: string) {
+  const clean = (v: string | undefined) => (v === undefined ? undefined : v.trim().toLowerCase());
+  const lang = clean(language)?.split('-')[0];
+  const g = clean(genre);
+  const a = clean(author);
+  for (const v of [lang, g, a]) if (v !== undefined && (v.length === 0 || v.length > 64)) return null;
+  return {
+    active: lang !== undefined || g !== undefined || a !== undefined,
+    matches: (info: BookInfo | undefined) =>
+      !!info &&
+      (lang === undefined || info.language === lang) &&
+      (g === undefined || info.genres.some((x) => x.toLowerCase() === g)) &&
+      (a === undefined || (info.author ?? '').toLowerCase().includes(a)),
+  };
+}
 
 /** The caller's UTC offset in minutes as JS getTimezoneOffset() gives it; 0 when absent or implausible. */
 function tzFrom(raw: string | undefined): number {
@@ -309,53 +343,187 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   // A device-sized digest of what the Stats page shows: the same finished counts, pages and streaks,
   // and reading days from every source. Counts cover all history; only the reading-day bitmap is
   // windowed (`days`, default 365, at most 3650) so the response stays a few hundred bytes.
+  // `language`, `genre` and `author` narrow it to matching books; `group_by=language|genre` adds one
+  // digest per value under `groups`.
   app.get('/stats/overview', async (c) => {
     const user = c.get('user');
     const tz = tzFrom(c.req.query('tz'));
     const daysRaw = Number(c.req.query('days') ?? DEFAULT_OVERVIEW_DAYS);
     const days = Number.isInteger(daysRaw) && daysRaw >= 1 ? Math.min(daysRaw, MAX_OVERVIEW_DAYS) : DEFAULT_OVERVIEW_DAYS;
+    const filter = bookFilter(c.req.query('language'), c.req.query('genre'), c.req.query('author'));
+    const groupBy = c.req.query('group_by');
+    if (filter === null || (groupBy !== undefined && groupBy !== 'language' && groupBy !== 'genre')) {
+      return kosyncError(c, 403, 2003, 'Invalid request');
+    }
     const activity = await activityFor(user.id, tz);
-    const { summary, daily } = summaryFor(user.id);
     const day = (t: number) => Math.floor(t / 86400000) - EPOCH_DAY; // days since 2000-01-01
-    const dayName = (d: number) => new Date((d + EPOCH_DAY) * 86400000).toISOString().slice(0, 10);
+    const dayOf = (name: string) => day(Date.parse(`${name}T00:00:00Z`));
     const today = day(Date.now() - tz * 60000);
-    const read = new Set<number>();
-    for (const d of activity.reading_days) read.add(day(Date.parse(`${d}T00:00:00Z`)));
-    for (const [d, seconds] of daily) if (seconds > 0) read.add(day(Date.parse(`${d}T00:00:00Z`)));
-    if (summary.anchor_day > 0 && summary.history_b64) {
-      const bits = Buffer.from(summary.history_b64, 'base64');
-      for (let n = 0; n < bits.length * 8; n++) if (bits[n >> 3] & (1 << (n & 7))) read.add(summary.anchor_day - n);
-    }
-    const past = [...read].filter((d) => d <= today).sort((a, b) => a - b);
-    let longest = 0;
-    for (let i = 0, run = 0; i < past.length; i++) {
-      run = i > 0 && past[i] === past[i - 1] + 1 ? run + 1 : 1;
-      longest = Math.max(longest, run);
-    }
-    // Today counts once read; until then the streak runs to yesterday.
-    let current = 0;
-    for (let d = read.has(today) ? today : today - 1; read.has(d); d--) current++;
-    const history = Buffer.alloc(Math.ceil(days / 8));
-    for (const d of past) if (today - d < days) history[(today - d) >> 3] |= 1 << ((today - d) & 7);
     const year = new Date(Date.now() - tz * 60000).getUTCFullYear();
-    const finished = activity.books.filter((b) => b.finished_at);
-    return c.json({
-      anchor_day: today,
-      days,
-      history_b64: history.toString('base64'),
-      reading_days: past.length,
-      current_streak: current,
-      longest_streak: longest,
-      books_finished: finished.length,
-      finished_this_year: finished.filter((b) => new Date((b.finished_at! - tz * 60) * 1000).getUTCFullYear() === year).length,
-      pages_read: activity.pages_total,
-      // Reading time as the reader measured it (devices that upload stats); none for synced-only books.
-      seconds: summary.seconds,
-      sessions: summary.sessions,
-      today_seconds: daily.get(dayName(today)) ?? 0,
-      week_seconds: [0, 1, 2, 3, 4, 5, 6].reduce((sum, n) => sum + (daily.get(dayName(today - n)) ?? 0), 0),
-    });
+
+    const digest = (read: Set<number>, books: typeof activity.books, pages: number, time: OverviewTime) => {
+      const past = [...read].filter((d) => d <= today).sort((a, b) => a - b);
+      let longest = 0;
+      for (let i = 0, run = 0; i < past.length; i++) {
+        run = i > 0 && past[i] === past[i - 1] + 1 ? run + 1 : 1;
+        longest = Math.max(longest, run);
+      }
+      // Today counts once read; until then the streak runs to yesterday.
+      let current = 0;
+      for (let d = read.has(today) ? today : today - 1; read.has(d); d--) current++;
+      const history = Buffer.alloc(Math.ceil(days / 8));
+      for (const d of past) if (today - d < days) history[(today - d) >> 3] |= 1 << ((today - d) & 7);
+      const finished = books.filter((b) => b.finished_at);
+      return {
+        anchor_day: today,
+        days,
+        history_b64: history.toString('base64'),
+        reading_days: past.length,
+        current_streak: current,
+        longest_streak: longest,
+        books_finished: finished.length,
+        finished_this_year: finished.filter((b) => new Date((b.finished_at! - tz * 60) * 1000).getUTCFullYear() === year).length,
+        pages_read: pages,
+        // Reading time as the reader measured it (devices that upload stats); none for synced-only books.
+        seconds: time.seconds,
+        sessions: time.sessions,
+        today_seconds: time.perDay.get(today) ?? 0,
+        week_seconds: [0, 1, 2, 3, 4, 5, 6].reduce((sum, n) => sum + (time.perDay.get(today - n) ?? 0), 0),
+      };
+    };
+
+    // The whole account: device snapshots and daily totals count too, not only per-book data.
+    const account = () => {
+      const { summary, daily } = summaryFor(user.id);
+      const read = new Set<number>();
+      for (const d of activity.reading_days) read.add(dayOf(d));
+      for (const [d, seconds] of daily) if (seconds > 0) read.add(dayOf(d));
+      if (summary.anchor_day > 0 && summary.history_b64) {
+        const bits = Buffer.from(summary.history_b64, 'base64');
+        for (let n = 0; n < bits.length * 8; n++) if (bits[n >> 3] & (1 << (n & 7))) read.add(summary.anchor_day - n);
+      }
+      const perDay = new Map([...daily].map(([d, seconds]) => [dayOf(d), seconds] as [number, number]));
+      return digest(read, activity.books, activity.pages_total, { seconds: summary.seconds, sessions: summary.sessions, perDay });
+    };
+    if (!filter.active && !groupBy) return c.json(account());
+
+    // Per-book view: what each book's day, finish and time data says, for the books a filter keeps.
+    const books = booksFor(user.id);
+    const forBooks = (keep: (d: string) => boolean) => {
+      const read = new Set<number>();
+      for (const d of activity.days) if (d.books.some((b) => keep(b.document))) read.add(dayOf(d.day));
+      const perDay = new Map<number, number>();
+      let seconds = 0;
+      let sessions = 0;
+      for (const [document, b] of books.time) {
+        if (!keep(document)) continue;
+        for (const [d, s] of b.perDay) {
+          read.add(d);
+          perDay.set(d, (perDay.get(d) ?? 0) + s);
+        }
+        seconds += b.seconds;
+        sessions += b.sessions;
+      }
+      const kept = activity.books.filter((b) => keep(b.document));
+      return digest(read, kept, kept.reduce((sum, b) => sum + (b.pages_read ?? 0), 0), { seconds, sessions, perDay });
+    };
+    const matches = (document: string) => filter.matches(books.info.get(document));
+    const out: Record<string, unknown> = filter.active ? forBooks(matches) : account();
+    if (groupBy) {
+      // A book counts in each of its genres; languages by their main subtag ("en-GB" is "en"). Values
+      // that differ only in case are one group, named as first seen.
+      const keys = new Map<string, { name: string; docs: Set<string> }>();
+      for (const [document, info] of books.info) {
+        if (filter.active && !filter.matches(info)) continue;
+        const values = groupBy === 'language' ? (info.language ? [info.language] : []) : info.genres;
+        for (const v of values) {
+          const key = v.toLowerCase();
+          if (!keys.has(key)) keys.set(key, { name: v, docs: new Set() });
+          keys.get(key)!.docs.add(document);
+        }
+      }
+      const groups = [...keys.values()].map(({ name, docs }) => [name, forBooks((d) => docs.has(d))] as const);
+      groups.sort((a, b) => b[1].reading_days - a[1].reading_days || a[0].localeCompare(b[0]));
+      out.groups = Object.fromEntries(groups.slice(0, MAX_OVERVIEW_GROUPS));
+    }
+    return c.json(out);
   });
+
+  /** Language, genres and author per book, and each book's measured time per day (merged copies folded). */
+  function booksFor(userId: number) {
+    // Merged copies: their time counts toward the book they were merged into (unless kept apart),
+    // and their own metadata row is left out in favour of that book's.
+    const resolve = statsAliases(db, userId);
+    const canonical = (d: string) => resolve.get(d) ?? d;
+    const aliases = new Set(
+      (db.prepare('SELECT alias FROM document_aliases WHERE user_id = ?').all(userId) as { alias: string }[]).map((r) => r.alias)
+    );
+    const info = new Map<string, BookInfo>();
+    for (const r of db.prepare('SELECT document, language, genres, author FROM documents WHERE user_id = ?').all(userId) as {
+      document: string;
+      language: string | null;
+      genres: string | null;
+      author: string | null;
+    }[]) {
+      if (aliases.has(r.document)) continue;
+      let genres: string[] = [];
+      try {
+        const list = r.genres ? JSON.parse(r.genres) : [];
+        if (Array.isArray(list)) genres = list.filter((g): g is string => typeof g === 'string');
+      } catch {
+        // a malformed list counts as none
+      }
+      info.set(r.document, {
+        language: r.language ? r.language.split('-')[0].toLowerCase() : null,
+        genres,
+        author: r.author,
+      });
+    }
+    // Totals from the per-book snapshots; time per day from reading sessions, on the reader's local day.
+    const time = new Map<string, OverviewTime>();
+    const entry = (d: string) => {
+      const key = canonical(d);
+      let t = time.get(key);
+      if (!t) time.set(key, (t = { seconds: 0, sessions: 0, perDay: new Map() }));
+      return t;
+    };
+    const snapshots = new Map<string, BookStatsSnapshot[]>();
+    for (const r of db.prepare('SELECT document, payload FROM stats_device_book WHERE user_id = ?').all(userId) as {
+      document: string;
+      payload: string;
+    }[]) {
+      const key = canonical(r.document);
+      snapshots.set(key, [...(snapshots.get(key) ?? []), JSON.parse(r.payload) as BookStatsSnapshot]);
+    }
+    for (const [document, list] of snapshots) {
+      const combined = combineBookStats(list);
+      const t = entry(document);
+      t.seconds = combined.seconds;
+      t.sessions = combined.sessions;
+    }
+    const sessionTotals = new Map<string, { seconds: number; count: number }>();
+    for (const s of db.prepare('SELECT document, started_at, seconds, utc_offset_minutes FROM reading_sessions WHERE user_id = ?').all(userId) as {
+      document: string;
+      started_at: number;
+      seconds: number;
+      utc_offset_minutes: number;
+    }[]) {
+      const t = entry(s.document);
+      const d = Math.floor((Number(s.started_at) + Number(s.utc_offset_minutes) * 60) / 86400) - EPOCH_DAY;
+      t.perDay.set(d, (t.perDay.get(d) ?? 0) + Number(s.seconds));
+      const total = sessionTotals.get(canonical(s.document)) ?? { seconds: 0, count: 0 };
+      total.seconds += Number(s.seconds);
+      total.count += 1;
+      sessionTotals.set(canonical(s.document), total);
+    }
+    // A book's sessions and its snapshot measure the same reading: take whichever saw more.
+    for (const [document, total] of sessionTotals) {
+      const t = entry(document);
+      t.seconds = Math.max(t.seconds, total.seconds);
+      t.sessions = Math.max(t.sessions, total.count);
+    }
+    return { info, time };
+  }
 
   return app;
 }

@@ -586,7 +586,7 @@ Server-side aggregate across all of the user's devices:
 }
 ```
 
-#### GET /api/v1/stats/overview?tz=&days=
+#### GET /api/v1/stats/overview?tz=&days=&language=&genre=&author=&group_by=
 
 A small digest for readers that want to show the account's totals on the device. It has the same numbers
 the Stats page shows, from every source: syncs, chosen start and finish dates, and device stats.
@@ -604,6 +604,21 @@ the Stats page shows, from every source: syncs, chosen start and finish dates, a
 - All the counts cover the whole history, whatever `days` is: `reading_days`, the streaks, the finished counts and the pages.
   The time fields come from device stats: `seconds`, `sessions`, `today_seconds`, and `week_seconds` for the
   last 7 days including today.
+
+Filters narrow the digest to matching books: `language` (main subtag, so `en` also matches `en-GB`),
+`genre` (one of the book's genres) and `author` (part of the name). All ignore case and can be combined.
+A filtered digest counts only per-book data: the books' sync and session days, their finished counts and
+pages, and their measured time (per-book stats and reading sessions). Device-wide totals with no book
+attached are left out. Per-book stats have no days, so `today_seconds` and `week_seconds` count only
+reading sessions there.
+
+`group_by=language` or `group_by=genre` adds `groups`, one digest per value, for the 20 values with the
+most reading days. A book counts in each of its genres. The top-level fields stay the account's (or the
+filter's, when one is given).
+
+```json
+{"anchor_day": 9793, "...": "...", "groups": {"ja": {"reading_days": 88, "...": "..."}, "de": {"...": "..."}}}
+```
 
 #### GET /api/v1/stats/global
 

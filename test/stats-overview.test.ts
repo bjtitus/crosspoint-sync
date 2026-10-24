@@ -47,4 +47,52 @@ describe('GET /api/v1/stats/overview', () => {
     expect(Buffer.from((await (await app.request('/api/v1/stats/overview', { headers })).json()).history_b64, 'base64').length).toBe(46);
     expect((await (await app.request('/api/v1/stats/overview?days=99999', { headers })).json()).days).toBe(3650);
   });
+
+  it('narrows to books by language, genre or author, and groups by language', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-24T18:00:00Z'));
+    const { app, db } = makeTestApp();
+    const { username, headers } = await registerUser(app);
+    const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number };
+    const [ja, de, en] = ['a', 'b', 'c'].map((ch) => ch.repeat(32));
+    const doc = db.prepare('INSERT INTO documents (user_id, document, author, language, genres, updated_at) VALUES (?, ?, ?, ?, ?, 0)');
+    doc.run(id, ja, 'Natsume Soseki', 'ja', JSON.stringify(['Classics', 'Fiction']));
+    doc.run(id, de, 'Thomas Mann', 'de-DE', JSON.stringify(['Classics']));
+    doc.run(id, en, 'Jane Doe', 'en', JSON.stringify(['classics'])); // same genre, other case
+    const log = db.prepare('INSERT INTO progress_log (user_id, document, device_id, percentage, at) VALUES (?, ?, ?, ?, ?)');
+    log.run(id, ja, 'x4', 0.5, at('2026-10-22'));
+    log.run(id, ja, 'x4', 1, at('2026-10-23'));
+    log.run(id, de, 'x4', 0.3, at('2026-10-24'));
+    log.run(id, en, 'x4', 1, at('2026-01-05'));
+    // Measured time: 20 minutes of the Japanese book today.
+    const session = {
+      session_id: 's1', document: ja, started_at: at('2026-10-24'), ended_at: at('2026-10-24') + 1200,
+      seconds: 1200, utc_offset_minutes: 0,
+    };
+    expect((await app.request('/api/v1/stats/sessions', { method: 'PUT', headers, body: JSON.stringify({ device_id: 'x4', items: [session] }) })).status).toBe(200);
+
+    const get = async (q: string) => (await app.request(`/api/v1/stats/overview?days=10&${q}`, { headers })).json();
+    expect(await get('language=JA')).toMatchObject({
+      reading_days: 3, // two synced days plus today's session
+      current_streak: 3,
+      books_finished: 1,
+      seconds: 1200,
+      sessions: 1,
+      today_seconds: 1200,
+    });
+    expect(await get('language=de')).toMatchObject({ reading_days: 1, books_finished: 0, seconds: 0 });
+    expect(await get('genre=classics')).toMatchObject({ reading_days: 4, books_finished: 2 });
+    expect(await get('author=mann')).toMatchObject({ reading_days: 1 });
+    expect(await get('genre=classics&language=de')).toMatchObject({ reading_days: 1 });
+
+    const grouped = await get('group_by=language');
+    expect(grouped.reading_days).toBe(4); // the account digest stays at the top
+    expect(Object.keys(grouped.groups)).toEqual(['ja', 'de', 'en']);
+    expect(grouped.groups.en).toMatchObject({ reading_days: 1, books_finished: 1, finished_this_year: 1 });
+    expect(Object.keys((await get('group_by=genre')).groups)).toEqual(['Classics', 'Fiction']);
+    expect(Object.keys((await get('group_by=genre&language=ja')).groups)).toEqual(['Classics', 'Fiction']);
+
+    expect((await app.request('/api/v1/stats/overview?group_by=author', { headers })).status).toBe(403);
+    expect((await app.request('/api/v1/stats/overview?genre=', { headers })).status).toBe(403);
+  });
 });
