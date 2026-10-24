@@ -609,7 +609,8 @@ Filters narrow the digest to matching books: `language` (main subtag, so `en` al
 `genre` (one of the book's genres) and `author` (part of the name). All ignore case and can be combined.
 A filtered digest counts only per-book data: the books' sync and session days, their finished counts and
 pages, and their measured time (per-book stats and reading sessions). Device-wide totals with no book
-attached are left out.
+attached are left out. Per-book stats have no days, so `today_seconds` and `week_seconds` count only
+reading sessions there.
 
 `group_by=language` or `group_by=genre` adds `groups`, one digest per value, for the 20 values with the
 most reading days. A book counts in each of its genres. The top-level fields stay the account's (or the
