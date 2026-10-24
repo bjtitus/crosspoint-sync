@@ -653,11 +653,12 @@ the server has `GOOGLE_BOOKS_API_KEY`, then Amazon's "Print length" via SearchAP
 
 #### PUT /api/v1/documents/{document}/info
 
-Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433}` (either
-field optional). Manual values stick, since lookups only fill blanks; `null` clears a field so it's
-looked up again. `language` (a BCP 47 tag) can be set the same way and then stays over device
-syncs; `null` clears it so the next device sync fills it again. Returns the stored
-`{document, cover_url, page_count, title, author, language}`.
+Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433,
+"genres": ["Fantasy", "Heist"]}` (every field optional). Manual values stick, since lookups only fill
+blanks and Hardcover's lookup leaves manual genres alone; `null` clears a field so it's looked up
+again. `genres` takes up to 10 names of at most 64 characters. `language` (a BCP 47 tag) can be set
+the same way and then stays over device syncs; `null` clears it so the next device sync fills it
+again. Returns the stored `{document, cover_url, page_count, title, author, language, genres}`.
 
 #### GET /api/v1/documents/{document}/cover/candidates?q=
 
