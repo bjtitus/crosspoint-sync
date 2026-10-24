@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
-import { isValidDocument } from '../kosync.js';
+import { isValidDocument, languageTag } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
 import { coverCandidates, documentInfo } from '../../models/cover.js';
@@ -271,9 +271,10 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     return c.json({ items: await coverCandidates(http ?? fetchTransport, title, q ? '' : (meta?.author ?? '')) });
   });
 
-  // Manual cover / print page count / title and author / genres when lookups got it wrong.
+  // Manual cover / print page count / title and author / language / genres when lookups got it wrong.
   // Manual values stick (lookups only fill blanks, and device syncs don't replace an
-  // edited title); null clears cover, page count or genres so they're looked up again.
+  // edited title or language); null clears cover, page count or genres so they're looked
+  // up again, and language so the next device sync fills it.
   app.put('/documents/:document/info', async (c) => {
     const param = c.req.param('document');
     let body: unknown;
@@ -288,6 +289,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const text = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 500) : v);
     const title = text(o.title);
     const author = text(o.author);
+    const language = o.language === undefined || o.language === null ? o.language : languageTag(o.language);
     // Same shape Hardcover's genres are stored in: a short list of short names.
     const genres = Array.isArray(o.genres) ? [...new Set(o.genres.map(text))] : o.genres;
     const genresOk =
@@ -298,7 +300,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const authorOk = author === undefined || typeof author === 'string';
     const coverOk = cover === undefined || cover === null || (typeof cover === 'string' && /^https?:\/\/\S{1,2000}$/.test(cover));
     const pagesOk = pages === undefined || pages === null || (Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= 100000);
-    if (!isValidDocument(param) || !coverOk || !pagesOk || !titleOk || !authorOk || !genresOk) {
+    if (!isValidDocument(param) || !coverOk || !pagesOk || !titleOk || !authorOk || !genresOk || (language === null && o.language !== null)) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const user = c.get('user');
@@ -310,6 +312,9 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     if (pages !== undefined) {
       db.prepare('UPDATE documents SET page_count = ?, cover_checked_at = CASE WHEN ? IS NULL THEN NULL ELSE cover_checked_at END WHERE user_id = ? AND document = ?').run(pages as number | null, pages as number | null, user.id, document);
+    }
+    if (language !== undefined) {
+      db.prepare('UPDATE documents SET language = ? WHERE user_id = ? AND document = ?').run(language as string | null, user.id, document);
     }
     if (genres !== undefined) {
       const list = genres as string[] | null;
@@ -330,10 +335,10 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       ).run((title as string | undefined) ?? null, author !== undefined ? 1 : 0, (author as string | undefined) ?? '', user.id, document);
       db.prepare("DELETE FROM connector_matches WHERE user_id = ? AND document = ? AND source IN ('auto', 'none')").run(user.id, document);
     }
-    const row = db.prepare('SELECT cover_url, page_count, title, author, genres FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as {
-      cover_url: string | null; page_count: number | null; title: string | null; author: string | null; genres: string | null;
+    const row = db.prepare('SELECT cover_url, page_count, title, author, language, genres FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as {
+      cover_url: string | null; page_count: number | null; title: string | null; author: string | null; language: string | null; genres: string | null;
     };
-    return c.json({ document, cover_url: row.cover_url, page_count: row.page_count, title: row.title, author: row.author,
+    return c.json({ document, cover_url: row.cover_url, page_count: row.page_count, title: row.title, author: row.author, language: row.language,
       genres: row.genres ? (JSON.parse(row.genres) as string[]) : [] });
   });
 
@@ -341,7 +346,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const user = c.get('user');
     const rows = db
       .prepare(
-        'SELECT document, title, author, filename, filesize, status, status_at, pause_reason, cover_url, page_count, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500'
+        'SELECT document, title, author, filename, filesize, language, status, status_at, pause_reason, cover_url, page_count, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500'
       )
       .all(user.id);
     return c.json({ items: rows });

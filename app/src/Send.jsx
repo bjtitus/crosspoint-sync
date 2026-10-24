@@ -22,7 +22,7 @@ import {
 import { isApp } from './api.js'
 import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
+import { ActionSheet, Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
 import ConversionLog from './ConversionLog.jsx'
 import { transferProgress } from './epub/log.js'
 
@@ -261,16 +261,19 @@ function Shelf({ prefs, ready }) {
 function ReaderFiles({ base, onFoldersChanged }) {
   const [path, setPath] = useState('/')
   const [files, setFiles] = useState(null)
-  const [error, setError] = useState(null)
+  const [listError, setListError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
+  const [deleting, setDeleting] = useState(null)
+  const [renaming, setRenaming] = useState(null)
+  const [creatingIn, setCreatingIn] = useState(null)
   useEffect(() => {
     let live = true
     setFiles(null)
-    setError(null)
+    setListError(null)
     listFiles(base, path).then(
       (f) => live && setFiles(f),
-      (e) => live && setError(e.message)
+      (e) => live && setListError(e.message)
     )
     return () => {
       live = false
@@ -279,48 +282,43 @@ function ReaderFiles({ base, onFoldersChanged }) {
 
   async function run(fn, foldersChanged) {
     setBusy(true)
-    setError(null)
     try {
       await fn()
       setTick((t) => t + 1)
       if (foldersChanged) onFoldersChanged()
-    } catch (e) {
-      setError(e.message)
     } finally {
       setBusy(false)
     }
   }
   const crumbs = path.split('/').filter(Boolean)
+  const locked = busy || !!deleting || !!renaming || creatingIn !== null
 
   return (
     <section className="mt-8">
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-display text-xl font-semibold text-stone-900">On your reader</h2>
         <button
-          disabled={busy}
-          onClick={() => {
-            const name = prompt('New folder name')?.trim()
-            if (name) run(() => makeFolder(base, path, name), true)
-          }}
+          disabled={locked}
+          onClick={() => setCreatingIn(path)}
           className="flex h-9 items-center gap-1.5 rounded-full bg-surface px-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
         >
           <FolderPlus className="size-4" /> New folder
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1 text-sm">
-        <button onClick={() => setPath('/')} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
+        <button disabled={locked} onClick={() => setPath('/')} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
           SD card
         </button>
         {crumbs.map((c, i) => (
           <span key={i} className="flex items-center gap-1">
             <ChevronRight className="size-3.5 text-stone-300" />
-            <button onClick={() => setPath(`/${crumbs.slice(0, i + 1).join('/')}`)} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
+            <button disabled={locked} onClick={() => setPath(`/${crumbs.slice(0, i + 1).join('/')}`)} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
               {c}
             </button>
           </span>
         ))}
       </div>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {listError && <p className="mt-2 text-sm text-red-600">{listError}</p>}
       <Card className="mt-3 divide-y divide-stone-100">
         {!files ? (
           <div className="py-6">
@@ -334,7 +332,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
             return (
               <div key={f.name} className="flex items-center gap-3 px-4 py-2.5">
                 <button
-                  disabled={!f.isDirectory}
+                  disabled={locked || !f.isDirectory}
                   onClick={() => setPath(full)}
                   className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
@@ -345,22 +343,16 @@ function ReaderFiles({ base, onFoldersChanged }) {
                   </span>
                 </button>
                 <button
-                  disabled={busy}
-                  onClick={() => {
-                    const name = prompt(`Rename "${f.name}" to`, f.name)?.trim()
-                    if (name && name !== f.name) run(() => renameFile(base, full, name), f.isDirectory)
-                  }}
+                  disabled={locked}
+                  onClick={() => setRenaming({ ...f, path: full })}
                   className="grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
                   aria-label={`Rename ${f.name}`}
                 >
                   <Pencil className="size-4" />
                 </button>
                 <button
-                  disabled={busy}
-                  onClick={() =>
-                    confirm(`Delete "${f.name}"${f.isDirectory ? ' and everything in it' : ''} from your reader?`) &&
-                    run(() => deleteFiles(base, [full]), f.isDirectory)
-                  }
+                  disabled={locked}
+                  onClick={() => setDeleting({ ...f, path: full })}
                   className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
                   aria-label={`Delete ${f.name}`}
                 >
@@ -371,6 +363,40 @@ function ReaderFiles({ base, onFoldersChanged }) {
           })
         )}
       </Card>
+      {creatingIn !== null && (
+        <ActionSheet
+          title="New folder"
+          inputLabel="Folder name"
+          actionLabel="Create folder"
+          pendingLabel="Creating…"
+          onClose={() => setCreatingIn(null)}
+          onConfirm={(name) => run(() => makeFolder(base, creatingIn, name), true)}
+        />
+      )}
+      {renaming && (
+        <ActionSheet
+          title={`Rename ${renaming.name}`}
+          inputLabel="New name"
+          initialValue={renaming.name}
+          isValid={(value) => value !== renaming.name}
+          actionLabel="Rename"
+          pendingLabel="Renaming…"
+          onClose={() => setRenaming(null)}
+          onConfirm={(name) => run(() => renameFile(base, renaming.path, name), renaming.isDirectory)}
+        />
+      )}
+      {deleting && (
+        <ActionSheet
+          title={`Delete ${deleting.name}?`}
+          actionLabel="Delete"
+          pendingLabel="Deleting…"
+          danger
+          onClose={() => setDeleting(null)}
+          onConfirm={() => run(() => deleteFiles(base, [deleting.path]), deleting.isDirectory)}
+        >
+          {deleting.isDirectory ? 'Delete this folder from your reader? The folder must be empty.' : 'Delete this file from your reader?'}
+        </ActionSheet>
+      )}
     </section>
   )
 }

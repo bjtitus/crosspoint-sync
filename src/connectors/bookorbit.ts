@@ -216,16 +216,40 @@ async function resolveEdition(cred: Credential, externalId: string, http: HttpTr
   return c ? fileId(http, c, externalId) : null;
 }
 
+interface FileProgress {
+  percentage: number;
+  updatedAt?: string | null;
+  textUpdatedAt?: string | null;
+  koreaderProgress?: string | null;
+  cfi?: string | null;
+}
+
+// The book-level endpoint only exposes the web reader's updatedAt. Plugin
+// writes preserve that timestamp; the file endpoint also exposes textUpdatedAt.
+async function fileProgress(cred: Credential, http: HttpTransport, file: string): Promise<FileProgress> {
+  const row = await bookorbitStatsJson(cred, http, `/books/files/${encodeURIComponent(file)}/progress`);
+  if (!row || typeof row !== 'object' || Array.isArray(row) ||
+      typeof row.percentage !== 'number' || !Number.isFinite(row.percentage)) {
+    throw new ConnectorOperationError('BookOrbit returned invalid progress', true);
+  }
+  return row;
+}
+
+function progressUpdatedAt(row: FileProgress): number {
+  const textTime = typeof row.textUpdatedAt === 'string' ? Date.parse(row.textUpdatedAt) : NaN;
+  if (Number.isFinite(textTime)) return textTime;
+  return typeof row.updatedAt === 'string' ? Date.parse(row.updatedAt) : NaN;
+}
+
 async function pullProgress(
   cred: Credential, m: Match, http: HttpTransport, sinceMs: number, ctx?: ConnectorContext
 ): Promise<InboundChange | null> {
   const c = parseCred(cred);
   if (!c) return null;
-  const rows = await bookorbitStatsJson(cred, http, `/books/${encodeURIComponent(m.externalId)}/progress`);
-  if (!Array.isArray(rows)) throw new ConnectorOperationError('BookOrbit returned invalid progress', true);
-  const row = rows.find((r: any) => String(r?.fileId) === m.externalEdition) ?? rows[0];
-  if (!row || typeof row.percentage !== 'number') return null;
-  const updatedAtMs = row.updatedAt ? Date.parse(row.updatedAt) : NaN;
+  const file = m.externalEdition ?? (await fileId(http, c, m.externalId));
+  if (!file) return null;
+  const row = await fileProgress(cred, http, file);
+  const updatedAtMs = progressUpdatedAt(row);
   if (!Number.isFinite(updatedAtMs) || updatedAtMs <= sinceMs) return null;
   const pct = Math.max(0, Math.min(1, row.percentage / 100));
   // Every BookOrbit save replaces both fields, so whichever is set is current:
@@ -233,9 +257,9 @@ async function pullProgress(
   let progress: string | undefined;
   if (typeof row.koreaderProgress === 'string' && row.koreaderProgress.startsWith('/body/')) {
     progress = row.koreaderProgress;
-  } else if (typeof row.cfi === 'string' && row.cfi && m.externalEdition && String(row.fileId) === m.externalEdition) {
-    // The stored map is of the matched file; progress on another file stays a percentage.
-    progress = await positionMap(http, c, m, m.externalEdition, ctx, (b) => epubXPath(b, row.cfi)).catch(() => undefined);
+  } else if (typeof row.cfi === 'string' && row.cfi) {
+    const cfi = row.cfi;
+    progress = await positionMap(http, c, m, file, ctx, (b) => epubXPath(b, cfi)).catch(() => undefined);
   }
   return { externalId: m.externalId, percentage: pct, finished: pct >= 0.999, updatedAtMs, ...(progress ? { progress } : {}) };
 }
@@ -352,12 +376,8 @@ async function push(
 
     // Backfills and delayed queue jobs retain the original reading timestamp.
     // Do not replace a position saved more recently by another reader.
-    const remote = await call(http, c, 'GET', `/books/${encodeURIComponent(m.externalId)}/progress`);
-    if (remote.status !== 200) return result(remote.status);
-    const rows = await remote.json();
-    if (!Array.isArray(rows)) return { ok: false, retryable: true, error: 'BookOrbit returned invalid progress' };
-    const current = rows.find((row: any) => String(row?.fileId) === file);
-    const updated = current?.updatedAt ? Date.parse(current.updatedAt) : NaN;
+    const current = await fileProgress(cred, http, file);
+    const updated = progressUpdatedAt(current);
     if (Number.isFinite(updated) && Math.floor(updated / 1000) > ev.timestamp) return { ok: true };
 
     // Enough precision that pulling our own write back reads as the same position, not an edit.

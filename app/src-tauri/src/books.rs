@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::ipc::{Channel, InvokeBody, Request};
 use tauri::{AppHandle, Manager};
+use unicode_normalization::UnicodeNormalization;
 
 type Res<T> = Result<T, String>;
 fn err(e: impl std::fmt::Display) -> String {
@@ -251,6 +252,16 @@ fn save_to_photos(bytes: &[u8]) -> Res<()> {
   Ok(())
 }
 
+fn upload_filename(name: &str, bytes: &[u8], rename: bool) -> String {
+  let metadata_name = if rename && name.to_ascii_lowercase().ends_with(".epub") {
+    crate::epub_name::metadata_filename(bytes)
+  } else {
+    None
+  };
+  // Match the reader's web uploader, including original-name and metadata fallback paths.
+  metadata_name.as_deref().unwrap_or(name).nfc().collect()
+}
+
 async fn send(
   base: &str,
   folder: &str,
@@ -264,12 +275,7 @@ async fn send(
       let _ = ch.send(p);
     }
   };
-  let is_epub = name.to_ascii_lowercase().ends_with(".epub");
-  // "Rename from Book Metadata", like the reader's own upload page.
-  let name = match rename && is_epub {
-    true => crate::epub_name::metadata_filename(&bytes).unwrap_or_else(|| name.to_string()),
-    false => name.to_string(),
-  };
+  let name = upload_filename(name, &bytes, rename);
   let name = name.as_str();
   emit(Progress::Uploading);
   let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string()).mime_str(mime_for(name)).map_err(err)?;
@@ -377,6 +383,22 @@ fn disposition_filename(cd: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn upload_names_are_nfc_with_or_without_metadata_renaming() {
+    for rename in [false, true] {
+      // Invalid/missing metadata falls back to the original name, still normalized.
+      for (input, expected) in [
+        ("Cafe\u{301}.epub", "Café.epub"),
+        ("\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}.EPUB", "한글.EPUB"),
+        ("Café.epub", "Café.epub"),
+        ("Dune.epub", "Dune.epub"),
+        ("① ﬁ.epub", "① ﬁ.epub"), // NFC must preserve compatibility characters.
+      ] {
+        assert_eq!(upload_filename(input, &[], rename), expected);
+      }
+    }
+  }
 
   #[test]
   fn resolves_extensions_and_names() {
