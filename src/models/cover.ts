@@ -215,11 +215,11 @@ async function sharedBookInfo(
   return info;
 }
 
-/** Store Hardcover's details on a document (a miss just records the check). */
+/** Store Hardcover's details on a document (a miss just records the check). Genres set by hand stay. */
 function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null): void {
   const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
   db.prepare(
-    `UPDATE documents SET hc_id = ?, hc_slug = ?, moods = ?, genres = ?, content_warnings = ?, rating = ?,
+    `UPDATE documents SET hc_id = ?, hc_slug = ?, moods = ?, genres = CASE WHEN genres_manual THEN genres ELSE ? END, content_warnings = ?, rating = ?,
        series = ?, hc_series_id = ?, series_position = ?, release_year = ?, description = ?, hc_checked_at = ?
      WHERE user_id = ? AND document = ?`
   ).run(
