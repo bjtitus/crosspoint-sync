@@ -240,6 +240,26 @@ export async function spotifyFirstSync(db: DB, userId: number, http: HttpTranspo
   return pollConnector(db, userId, 'spotify', http);
 }
 
+/**
+ * Jellyfin's hourly pull (same shape as pollSpotify): per-match UserData for every
+ * user with a matched book. Progress requests still pull on demand.
+ */
+export async function pollJellyfin(db: DB, http: HttpTransport = fetchTransport): Promise<number> {
+  let total = 0;
+  for (const userId of usersWithMatches(db, 'jellyfin', false)) {
+    total += await pollConnector(db, userId, 'jellyfin', http);
+  }
+  return total;
+}
+
+/** After Jellyfin is first linked: match books in progress, then pull their positions. */
+export async function jellyfinFirstSync(db: DB, userId: number, http: HttpTransport = fetchTransport): Promise<number> {
+  for (const document of inProgressDocuments(db, userId)) {
+    await resolveMatch(db, 'jellyfin', userId, document, http).catch(() => null);
+  }
+  return pollConnector(db, userId, 'jellyfin', http);
+}
+
 /** Start a periodic fan-in poller (pollAll by default); returns a stop function. */
 export function startFanInWorker(db: DB, intervalMs = 5 * 60_000, poll = pollAll): () => void {
   let running = false;

@@ -10,7 +10,7 @@ export type ProgressRefresh = (userId: number, document: string) => Promise<void
 
 /**
  * Per-book fan-in pullers consulted when a device asks for progress. This
- * runs alongside Spotify's hourly poll. BookOrbit also supports manual per-book
+ * runs alongside Jellyfin's and Spotify's hourly polls. BookOrbit also supports manual per-book
  * sync; it does not poll in the background.
  *
  * strict:        a puller whose failure fails the progress GET (BookFusion: its
@@ -30,6 +30,7 @@ const PER_BOOK_PULLERS: { id: string; strict: boolean; sidecarOnly: boolean; mat
   { id: 'bookfusion', strict: true, sidecarOnly: true },
   { id: 'kindle', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'bookorbit', strict: false, sidecarOnly: false, matchOnDemand: true },
+  { id: 'jellyfin', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'spotify', strict: false, sidecarOnly: false, matchOnDemand: true },
   { id: 'audiobookshelf', strict: false, sidecarOnly: false, matchOnDemand: true },
 ];

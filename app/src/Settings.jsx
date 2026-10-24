@@ -44,6 +44,7 @@ const HINTS = {
   kosync: 'Mirrors your reading progress to another KOReader-compatible (KOSync) server. For Calibre-Web, use your library URL ending in /kosync.',
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
+  jellyfin: 'Syncs reading progress with your Jellyfin book library (Jellyfin 12.0 or newer). Sign in with your Jellyfin username and password.',
   bookorbit: 'Syncs progress both ways, adds clippings as highlights, and exchanges reading sessions for matched books. Imports BookOrbit history and exports sessions recorded by newer CrossInk firmware. Includes other BookOrbit reader history alongside your device stats. Repeated sessions are counted once.',
   seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You approve the request in the Seekquel app.',
   spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
@@ -397,12 +398,12 @@ export function LinkForm({ session, conn, onLinked }) {
         {conn.id === 'hardcover' && tokenForm}
       </div>
     )
-  } else if (conn.credential_kind === 'kosync') {
+  } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
     body = (
       <form className="space-y-2">
         <input
           className={`${field} font-mono`}
-          placeholder={conn.id === 'bookorbit' ? 'https://books.example.com' : 'https://sync.koreader.rocks'}
+          placeholder={{ bookorbit: 'https://books.example.com', jellyfin: 'https://jellyfin.example.com' }[conn.id] ?? 'https://sync.koreader.rocks'}
           value={v.server ?? ''}
           onChange={set('server')}
           inputMode="url"
@@ -410,7 +411,7 @@ export function LinkForm({ session, conn, onLinked }) {
         />
         <input className={field} placeholder="Username" value={v.username ?? ''} onChange={set('username')} autoCapitalize="none" autoComplete="off" />
         <input className={field} type="password" placeholder="Password" value={v.password ?? ''} onChange={set('password')} autoComplete="off" />
-        {submit('Connect', () => ({
+        {submit(conn.id === 'jellyfin' ? 'Connect Jellyfin' : 'Connect', () => ({
           server: (v.server ?? '').trim(),
           username: (v.username ?? '').trim(),
           password: v.password ?? '',

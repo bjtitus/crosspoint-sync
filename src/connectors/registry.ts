@@ -5,6 +5,7 @@ import { readwiseReaderConnector } from './readwise-reader.js';
 import { kosyncConnector } from './kosync.js';
 import { bookfusionConnector } from './bookfusion.js';
 import { audiobookshelfConnector } from './audiobookshelf.js';
+import { jellyfinConnector } from './jellyfin.js';
 import { microblogConnector } from './microblog.js';
 import { kindleConnector } from './kindle.js';
 import { bookorbitConnector } from './bookorbit.js';
@@ -19,6 +20,7 @@ const CONNECTORS: Connector[] = [
   readwiseReaderConnector,
   bookfusionConnector,
   audiobookshelfConnector,
+  jellyfinConnector,
   bookorbitConnector,
   spotifyConnector,
   seekquelConnector,

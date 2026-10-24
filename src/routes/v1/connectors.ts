@@ -6,7 +6,7 @@ import { secretsEnabled } from '../../crypto/secrets.js';
 import { fetchTransport, getConnector, listConnectors } from '../../connectors/registry.js';
 import { purgeConnector, queueDepth, queueErrors } from '../../connectors/queue.js';
 import { backfillConnector } from '../../connectors/fanout.js';
-import { pollConnector, spotifyFirstSync } from '../../connectors/fanin.js';
+import { pollConnector, jellyfinFirstSync, spotifyFirstSync } from '../../connectors/fanin.js';
 import { resolveMatch } from '../../connectors/runner.js';
 import { CLIENT_ID_RE, CLIENT_ID_REJECTED, playWhenDeviceAppears, spotifyPlan, spotifyResume, spotifyTracks } from '../../connectors/spotify.js';
 import {
@@ -245,8 +245,14 @@ export function connectorRoutes(
       return c.json({ code: 2003, message: result.error ?? 'Credential rejected' }, 400);
     }
     const user = c.get('user');
+    const first = !getAccount(db, user.id, conn.id);
     upsertAccount(db, user.id, conn.id, cred as Record<string, unknown>, result.accountLabel ?? null);
     if (conn.id === 'bookorbit') void importBookorbitStats(db, user.id, transport);
+    if (first && conn.id === 'jellyfin') {
+      jellyfinFirstSync(db, user.id, transport).catch((err) =>
+        console.error(JSON.stringify({ msg: 'first sync failed', connector: conn.id, user_id: user.id,
+          error: err instanceof Error ? err.message : String(err) })));
+    }
     return c.json({ id: conn.id, linked: true, account: result.accountLabel ?? null });
   });
 

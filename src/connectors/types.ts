@@ -24,7 +24,7 @@ export interface ConnectorOption {
   gates?: DataKind;
 }
 
-export type CredentialKind = 'token' | 'oauth' | 'cookies' | 'kosync' | 'device_code' | 'abs';
+export type CredentialKind = 'token' | 'oauth' | 'cookies' | 'kosync' | 'device_code' | 'abs' | 'jellyfin';
 
 /** Interactive OAuth device-code link handshake (BookFusion). */
 export interface DeviceLinkStart {

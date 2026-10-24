@@ -309,10 +309,10 @@ export function inProgressDocuments(db: DB, userId: number): string[] {
 }
 
 /** Users with this connector enabled, linked and healthy, and at least one matched book. */
-export function usersWithMatches(db: DB, connectorId: string): number[] {
+export function usersWithMatches(db: DB, connectorId: string, revealed = true): number[] {
   return (db.prepare(
     `SELECT DISTINCT a.user_id FROM connector_accounts a
-       JOIN connector_reveals r ON r.user_id = a.user_id AND r.connector_id = a.connector_id
+       ${revealed ? 'JOIN connector_reveals r ON r.user_id = a.user_id AND r.connector_id = a.connector_id' : ''}
        JOIN connector_matches m ON m.user_id = a.user_id AND m.connector_id = a.connector_id
       WHERE a.connector_id = ? AND a.enabled = 1 AND a.status = 'ok' AND m.external_id IS NOT NULL ORDER BY a.user_id`
   ).all(connectorId) as { user_id: number }[]).map((r) => r.user_id);
