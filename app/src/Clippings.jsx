@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Copy, FileDown, Quote, Search, Share2 } from 'lucide-react'
+import { Copy, FileDown, Quote, Search } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
 import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
-import { Card, Cover, EmptyState, ErrorNote, Eyebrow, Spinner, useLoad } from './ui.jsx'
+import { Cover, EmptyState, ErrorNote, ShareIcon, Spinner, useLoad } from './ui.jsx'
 
 const date = (unix) => new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 
@@ -27,26 +27,28 @@ function markdown(groups) {
 
 function Clip({ session, clip, book, onShare, onDelete, showBook }) {
   return (
-    <Card className="group relative p-4 select-none [-webkit-touch-callout:none] md:select-text" {...hold(() => onDelete(clip))}>
+    <article className={`group relative select-none [-webkit-touch-callout:none] ${showBook
+      ? 'border-b border-stone-200 pt-6 pb-4 pr-8'
+      : 'border-b border-stone-200 py-5 pr-8'}`} {...hold(() => onDelete(clip))}>
       <ClipMenu onDelete={() => onDelete(clip)} />
+      <blockquote className="font-display text-lg/relaxed text-stone-800">{clip.text}</blockquote>
+      {clip.note && <p className="mt-3 font-hand text-lg/6 text-brand-700">{clip.note}</p>}
       {showBook && (
-        <a href={`#/book/${book.document}`} className="mb-3 flex items-center gap-3">
+        <a href={`#/book/${book.document}`} className="mt-6 flex items-center gap-3 pr-5">
           <Cover session={session} book={book} small className="w-8" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-stone-900">{book.title || book.filename}</p>
+            <p className="text-sm font-medium text-stone-900">{book.title || book.filename}</p>
             <p className="truncate text-xs text-stone-500">{book.author}</p>
           </div>
         </a>
       )}
-      <blockquote className="border-l-2 border-brand-300 pl-3 font-display text-[0.95rem]/relaxed text-stone-800 italic">{clip.text}</blockquote>
-      {clip.note && <p className="mt-3 font-hand text-lg/6 text-brand-700">{clip.note}</p>}
       <div className="mt-2 flex items-center justify-between gap-3">
-        <button onClick={() => onShare(clip)} className="-ml-2 flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-brand-600 active:bg-stone-100">
-          <Share2 className="size-4" /> Share
+        <button onClick={() => onShare(clip)} className="-ml-2 flex h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-brand-600 active:bg-stone-100">
+          <ShareIcon className="size-4" /> Share
         </button>
-        <p className="truncate font-mono text-[0.65rem] text-stone-400">{[clip.chapter, date(clip.created_at)].filter(Boolean).join(' · ')}</p>
+        <p className="truncate text-xs text-stone-500">{[clip.chapter, date(clip.created_at)].filter(Boolean).join(' · ')}</p>
       </div>
-    </Card>
+    </article>
   )
 }
 
@@ -85,7 +87,6 @@ export default function Clippings({ session, books }) {
 
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <Eyebrow className="md:hidden">Passages worth keeping</Eyebrow>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Clippings</h1>
 
       {error && !items ? (
@@ -102,51 +103,59 @@ export default function Clippings({ session, books }) {
         <>
           {daily && !q && !only && (
             <section className="mt-6">
-              <p className="font-mono text-[0.65rem] font-medium tracking-wider text-stone-400 uppercase">Highlight of the day</p>
+              <p className="inline-block -rotate-1 font-hand text-xl text-brand-600">Highlight of the day</p>
               <div className="mt-2 md:max-w-2xl">
                 <Clip session={session} clip={daily} book={byDoc.get(daily.document)} onShare={setSharing} onDelete={setDeleting} showBook />
               </div>
             </section>
           )}
 
-          <div className="mt-6 flex flex-col gap-3 md:flex-row md:items-center">
-            <div className="relative md:w-80">
+          <div className="mt-6 flex items-center gap-3">
+            <div className="relative min-w-0 flex-1 md:max-w-sm">
               <Search className="pointer-events-none absolute top-3.5 left-4 size-5 text-stone-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                aria-label="Search clippings"
                 placeholder="Search clippings"
                 enterKeyHint="search"
                 className="h-12 w-full rounded-xl bg-surface pr-4 pl-12 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60"
               />
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => exportMd(false)} className="flex h-11 items-center gap-2 rounded-xl bg-surface px-4 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
-                <Copy className="size-4" /> Copy Markdown
-              </button>
-              {isApp && (
-                <button onClick={() => exportMd(true)} className="flex h-11 items-center gap-2 rounded-xl bg-surface px-4 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
-                  <FileDown className="size-4" /> Save .md
+            <details className="relative shrink-0">
+              <summary aria-label="Export clippings" title="Export clippings" className="grid size-11 cursor-pointer list-none place-items-center rounded-full text-stone-600 hover:bg-stone-100 active:bg-stone-200 [&::-webkit-details-marker]:hidden">
+                <FileDown aria-hidden="true" className="size-5" strokeWidth={1.75} />
+              </summary>
+              <div className="absolute right-0 z-20 mt-1 w-48 rounded-xl bg-surface p-2 shadow-lg ring-1 ring-stone-950/10">
+                <button onClick={() => exportMd(false)} className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100">
+                  <Copy className="size-4" /> Copy Markdown
                 </button>
-              )}
-            </div>
+                {isApp && (
+                  <button onClick={() => exportMd(true)} className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100">
+                    <FileDown className="size-4" /> Save .md
+                  </button>
+                )}
+              </div>
+            </details>
           </div>
           {note && <p className="mt-2 text-sm text-stone-600">{note}</p>}
 
-          <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
+          <div className="-mx-4 mt-4 flex gap-5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:px-0">
             <button
+              aria-pressed={!only}
               onClick={() => setOnly(null)}
-              className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${!only ? 'bg-brand-500 text-white' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'}`}
+              className={`shrink-0 min-h-11 border-b-2 px-1 py-2 text-sm font-medium ${!only ? 'border-brand-500 text-brand-700' : 'border-transparent text-stone-500'}`}
             >
-              All <span className="ml-0.5 font-mono text-xs opacity-70">{all.length}</span>
+              All <span className="ml-0.5 text-xs tabular-nums">{all.length}</span>
             </button>
             {[...counts].map(([doc, n]) => (
               <button
                 key={doc}
+                aria-pressed={only === doc}
                 onClick={() => setOnly(only === doc ? null : doc)}
-                className={`max-w-56 shrink-0 truncate rounded-full px-3.5 py-1.5 text-sm font-medium ${only === doc ? 'bg-brand-500 text-white' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'}`}
+                className={`max-w-56 shrink-0 truncate min-h-11 border-b-2 px-1 py-2 text-sm font-medium ${only === doc ? 'border-brand-500 text-brand-700' : 'border-transparent text-stone-500'}`}
               >
-                {byDoc.get(doc).title || byDoc.get(doc).filename} <span className="ml-0.5 font-mono text-xs opacity-70">{n}</span>
+                {byDoc.get(doc).title || byDoc.get(doc).filename} <span className="ml-0.5 text-xs tabular-nums">{n}</span>
               </button>
             ))}
           </div>
@@ -165,7 +174,7 @@ export default function Clippings({ session, books }) {
                   <p className="truncate text-sm text-stone-500">{book.author}</p>
                 </div>
               </a>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="mt-3 grid gap-x-8 md:grid-cols-2">
                 {clips.map((c) => (
                   <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} onDelete={setDeleting} />
                 ))}

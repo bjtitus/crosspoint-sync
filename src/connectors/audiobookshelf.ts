@@ -1,3 +1,4 @@
+import { ConnectorOperationError } from './types.js';
 import { cachedEpub, epubPosition, epubXPath, withEpubMap, type TextEpub } from './bookfusion-epub.js';
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import type {
@@ -259,7 +260,11 @@ async function pullProgress(
 ): Promise<InboundChange | null> {
   const c = parseCred(cred);
   if (!c) return null;
-  const { body: p } = await absGet(http, c, `/api/me/progress/${encodeURIComponent(m.externalId)}`);
+  const { status, body: p } = await absGet(http, c, `/api/me/progress/${encodeURIComponent(m.externalId)}`);
+  if (status === 404) return null; // No reading position yet.
+  if (status < 200 || status >= 300 || !p) {
+    throw new ConnectorOperationError(`Audiobookshelf progress request failed (${status})`, status === 429 || status >= 500, status === 401 || status === 403);
+  }
   const lu = typeof p?.lastUpdate === 'number' ? p.lastUpdate : 0;
   if (!p || lu <= sinceMs) return null;
   const hasAudio = typeof p.duration === 'number' && p.duration > 0;

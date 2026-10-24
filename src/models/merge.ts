@@ -1,5 +1,7 @@
 import { withTransaction, type DB } from '../db/db.js';
 import { nextChangeSeq } from './changes.js';
+import { md5Hex } from '../auth/password.js';
+import { autoUnpause } from './pause.js';
 
 /**
  * Manual document merges. The kosync document key is client-computed and
@@ -15,6 +17,34 @@ export function resolveDocument(db: DB, userId: number, document: string): strin
     .prepare('SELECT document FROM document_aliases WHERE user_id = ? AND alias = ?')
     .get(userId, document) as { document: string } | undefined;
   return row?.document ?? document;
+}
+
+/**
+ * A reader's two keys for one book are MD5(filename) and the binary partial-MD5,
+ * and smart sync reads the other key's record but uploads under its own. A first
+ * push under an unknown key that is a known book's filename hash (or whose
+ * filename hashes to a known book) is aliased to that book instead of starting a
+ * duplicate. Returns the document to write under.
+ */
+export function adoptFilenameTwin(db: DB, userId: number, document: string, filename: string | null, now: number): string {
+  const resolved = resolveDocument(db, userId, document);
+  const hasProgress = (doc: string) =>
+    db.prepare('SELECT 1 FROM progress WHERE user_id = ? AND document = ? LIMIT 1').get(userId, doc) !== undefined;
+  if (resolved !== document || hasProgress(document)) return resolved;
+  let twin: string | undefined;
+  const named = filename ? resolveDocument(db, userId, md5Hex(filename)) : undefined;
+  if (named && named !== document && hasProgress(named)) twin = named;
+  else {
+    const rows = db
+      .prepare('SELECT document, filename FROM documents WHERE user_id = ? AND filename IS NOT NULL')
+      .all(userId) as unknown as { document: string; filename: string }[];
+    twin = rows.find((r) => md5Hex(r.filename) === document && hasProgress(r.document))?.document;
+  }
+  if (!twin) return document;
+  db.prepare(
+    'INSERT INTO document_aliases (user_id, alias, document, created_at, merge_stats) VALUES (?, ?, ?, ?, 1)'
+  ).run(userId, document, twin, now);
+  return twin;
 }
 
 /** All alias hashes per canonical document for a user. */
@@ -118,8 +148,8 @@ export function mergeDocuments(
 
     // documents: canonical metadata wins, alias fills the gaps.
     db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, updated_at)
-       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, ? FROM documents WHERE user_id = ? AND document = ?
+      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, genres, genres_manual, updated_at)
+       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, genres, genres_manual, ? FROM documents WHERE user_id = ? AND document = ?
        ON CONFLICT(user_id, document) DO UPDATE SET
          title = COALESCE(documents.title, excluded.title),
          author = COALESCE(documents.author, excluded.author),
@@ -132,9 +162,17 @@ export function mergeDocuments(
          finished_date = COALESCE(documents.finished_date, excluded.finished_date),
          cover_url = COALESCE(documents.cover_url, excluded.cover_url),
          page_count = COALESCE(documents.page_count, excluded.page_count),
+         language = COALESCE(documents.language, excluded.language),
+         -- Genres set by hand beat Hardcover's; otherwise the kept document's win.
+         genres = CASE WHEN excluded.genres_manual AND NOT documents.genres_manual THEN excluded.genres
+                       ELSE COALESCE(documents.genres, excluded.genres) END,
+         genres_manual = MAX(documents.genres_manual, excluded.genres_manual),
          updated_at = excluded.updated_at`
     ).run(into, now, userId, from);
     db.prepare('DELETE FROM documents WHERE user_id = ? AND document = ?').run(userId, from);
+    // A pause carried over from either side gives way to progress made since.
+    const last = db.prepare('SELECT MAX(at) AS at FROM progress_log WHERE user_id = ? AND document = ?').get(userId, into) as { at: number | null };
+    if (last.at !== null) autoUnpause(db, userId, into, last.at);
 
     // Uniquely-keyed side tables: move what fits, drop the (rare) conflicts.
     for (const table of ['bookmarks', 'clippings', 'connector_matches', 'connector_queue']) {

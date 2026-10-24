@@ -1,4 +1,5 @@
-import type { DB } from '../db/db.js';
+import { bookorbitDestination } from '../models/reading-sessions.js';
+import { withTransaction, type DB } from '../db/db.js';
 import { nowSeconds } from '../models/sync.js';
 import { decryptSecret, encryptSecret } from '../crypto/secrets.js';
 import { SAVE_CREDENTIAL, type Connector, type Credential, type DataKind, type DocumentMeta, type Match, type SavableCredential } from './types.js';
@@ -24,18 +25,39 @@ export function upsertAccount(
   now = nowSeconds()
 ): void {
   const enc = encryptSecret(JSON.stringify(cred));
-  db.prepare(
-    `INSERT INTO connector_accounts
-       (user_id, connector_id, cred_enc, account_label, status, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'ok', 1, ?, ?)
-     ON CONFLICT(user_id, connector_id) DO UPDATE SET
-       cred_enc = excluded.cred_enc,
-       account_label = excluded.account_label,
-       status = 'ok',
-       enabled = 1,
-       last_error = NULL,
-       updated_at = excluded.updated_at`
-  ).run(userId, connectorId, enc, accountLabel, now, now);
+  const previous = connectorId === 'bookorbit' ? getAccount(db, userId, connectorId) : null;
+  let sameOrbitAccount = false;
+  if (previous) {
+    try {
+      const old = decryptCredential(previous);
+      sameOrbitAccount = old.server === cred.server && old.username === cred.username;
+    } catch { /* Reconnecting also recovers an unreadable old credential. */ }
+  }
+  withTransaction(db, () => {
+    db.prepare(
+      `INSERT INTO connector_accounts
+         (user_id, connector_id, cred_enc, account_label, status, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'ok', 1, ?, ?)
+       ON CONFLICT(user_id, connector_id) DO UPDATE SET
+         cred_enc = excluded.cred_enc,
+         account_label = excluded.account_label,
+         status = 'ok',
+         enabled = 1,
+         last_error = NULL,
+         updated_at = excluded.updated_at`
+    ).run(userId, connectorId, enc, accountLabel, now, now);
+    if (connectorId === 'bookorbit') {
+      db.prepare(`INSERT INTO bookorbit_session_destination VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET destination=excluded.destination`)
+        .run(userId, bookorbitDestination(cred));
+      // A replacement account must not inherit sessions or external book IDs.
+      db.prepare('DELETE FROM bookorbit_stats_sync WHERE user_id = ?').run(userId);
+      if (previous && !sameOrbitAccount) {
+        for (const table of ['connector_matches', 'connector_queue', 'epub_maps']) {
+          db.prepare(`DELETE FROM ${table} WHERE user_id = ? AND connector_id = ?`).run(userId, connectorId);
+        }
+      }
+    }
+  });
 }
 
 export function getAccount(db: DB, userId: number, connectorId: string): AccountRow | null {

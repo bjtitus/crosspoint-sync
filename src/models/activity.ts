@@ -63,6 +63,8 @@ export interface Activity {
  *  position before and after that day's syncs (0..1). */
 export interface DayBook {
   document: string;
+  /** A chosen start date, independent of the first uploaded position. */
+  started?: boolean;
   pages: number;
   syncs: number;
   from: number;
@@ -151,6 +153,14 @@ export function computeActivity(
     const manualStart = localNoon(info?.start_date ?? undefined);
     const datedStart = manualStart ?? localNoon(startDates.get(document));
     const started = datedStart ?? list[0].at;
+    if (datedStart !== null) {
+      const key = dayKey(datedStart);
+      let d = days.get(key);
+      if (!d) days.set(key, (d = { pages: 0, syncs: 0, books: new Map() }));
+      let b = d.books.get(document);
+      if (!b) d.books.set(document, (b = { document, pages: 0, syncs: 0, from: 0, to: 0 }));
+      b.started = true;
+    }
     // Explicit dates mark only their own days, without inventing daily progress.
     // Resolve each endpoint independently: manual -> CrossInk -> server history.
     if (datedStart !== null) readingDays.add(dayKey(datedStart));

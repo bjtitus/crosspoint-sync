@@ -8,6 +8,7 @@ and any KOReader device.
 - **Better multi-device sync.** Progress is stored per device and the newest position wins, fixing
   the ping-pong you get with stock kosync servers.
 - **Server-side service connectors.** Link services such as Hardcover, Micro.blog, Audiobookshelf, BookOrbit, Readwise Reader, and Seekquel once; readers continue speaking standard KOSync while the server updates external reading state.
+- **BookOrbit on demand.** Reader progress requests fetch the matched book’s latest progress and highlights. On a book’s page, **Connected services → BookOrbit → Sync now** pulls before queueing outbound updates and refreshes that book’s reading history. BookOrbit has no periodic polling; reading-session uploads trigger delivery directly.
 - **Lossless CrossPoint sync.** An extended API carries the full CrossPoint position (spine,
   paragraph, anchor, page hints), not just a lossy xpath + percentage.
 - **Bookmarks, clippings, and reading stats.** Delta sync with tombstones for bookmarks and
@@ -37,6 +38,45 @@ For local image builds from the checkout, use:
 ```sh
 docker compose -f docker-compose.dev.yml up -d --build
 ```
+
+### HTTPS reverse proxy (Caddy, nginx, etc.)
+
+When the proxy handles HTTPS and forwards HTTP to Sync, set `TRUST_PROXY=true`
+**on the Sync server**. Without it, linking BookOrbit or another connector fails
+with "Connector credentials require HTTPS", even when the browser uses HTTPS.
+This check concerns the connection to Sync, regardless of the BookOrbit server URL.
+
+For Caddy running directly on the Docker host, replace the existing published port
+in `docker-compose.yml` and add `TRUST_PROXY` to the service's existing environment:
+
+```yaml
+services:
+  crosspoint-sync:
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      TRUST_PROXY: "true"
+```
+
+Keep the service's other settings, including `TOKEN_ENC_KEY` for connector storage.
+Apply the changes with `docker compose up -d` so the container is recreated with
+the new environment. Adding `TRUST_PROXY=true` to a Compose `.env` file alone
+does not pass it into the container; it must appear in the service's `environment`.
+For bare Node, set it in the server process's environment and restart the process.
+
+A minimal Caddyfile for that host setup is:
+
+```caddyfile
+sync.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+[Caddy sets `X-Forwarded-Proto` automatically](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#defaults).
+Other proxies must also overwrite it with the original request's scheme. Only enable
+proxy trust when clients cannot bypass the proxy and reach Sync directly. If Caddy
+runs in Docker, use a shared private Docker network and proxy to `crosspoint-sync:8080`
+without publishing Sync's port, instead of using the host loopback example above.
 
 ### Railway (hosted-style deploy)
 

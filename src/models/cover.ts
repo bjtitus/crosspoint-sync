@@ -4,7 +4,7 @@ import { fetchTransport } from '../connectors/registry.js';
 import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
-import { hardcoverBook, type HardcoverBook } from './hardcover-catalog.js';
+import { cacheKey, hardcoverBook, type HardcoverBook } from './hardcover-catalog.js';
 
 /**
  * Cover art and print page count from title/author. Covers use the same
@@ -155,7 +155,10 @@ export async function findBookInfo(
   const [apple, ol] = await Promise.all([safe(itunes(http, title, author)), safe(openLibrary(http, title, author))]);
   // `known` (Hardcover's) fills in after the free sources, before the keyed/paid ones.
   const cover = best(title, author, apple, (c) => c.url)?.url ?? best(title, author, ol, (c) => c.url)?.url ?? known.cover ?? null;
-  let pages = best(title, author, ol, (c) => c.pages)?.pages ?? known.pages ?? null;
+  let pages = known.pages ?? best(title, author, ol, (c) => c.pages)?.pages ?? null;
+  // A series prefix ("Game Changers 6: The Long Game") hides the book from Open Library.
+  const short = title.split(': ').slice(1).join(': ');
+  if (!pages && short) pages = best(short, author, await safe(openLibrary(http, short, author)), (c) => c.pages)?.pages ?? null;
   if (!pages && env.GOOGLE_BOOKS_API_KEY) {
     pages = best(title, author, await safe(googleBooks(http, title, author, env.GOOGLE_BOOKS_API_KEY)), (c) => c.pages)?.pages ?? null;
   }
@@ -187,11 +190,36 @@ export async function coverCandidates(http: HttpTransport, title: string, author
     .map(({ c }) => ({ url: c.url!, title: c.title, author: c.author ?? null, source: c.source, pages: c.pages ?? null }));
 }
 
-/** Store Hardcover's details on a document (a miss just records the check). */
+/** findBookInfo cached across users by title/author (paid lookups run once per book). */
+async function sharedBookInfo(
+  db: DB,
+  http: HttpTransport,
+  title: string,
+  author: string,
+  env: NodeJS.ProcessEnv,
+  known: { cover?: string | null; pages?: number | null }
+): Promise<BookInfo> {
+  const key = `info:${cacheKey(title, author)}`;
+  const hit = db.prepare('SELECT data, checked_at FROM catalog_cache WHERE key = ?').get(key) as
+    | { data: string; checked_at: number }
+    | undefined;
+  const cached = hit ? (JSON.parse(hit.data) as BookInfo) : null;
+  if (hit && cached && (cached.pages || nowSeconds() - hit.checked_at < RETRY_AFTER)) {
+    return { cover: cached.cover ?? known.cover ?? null, pages: cached.pages ?? known.pages ?? null };
+  }
+  const info = await findBookInfo(http, title, author, env, known);
+  db.prepare(
+    `INSERT INTO catalog_cache (key, data, checked_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET data = excluded.data, checked_at = excluded.checked_at`
+  ).run(key, JSON.stringify(info), nowSeconds());
+  return info;
+}
+
+/** Store Hardcover's details on a document (a miss just records the check). Genres set by hand stay. */
 function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null): void {
   const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
   db.prepare(
-    `UPDATE documents SET hc_id = ?, hc_slug = ?, moods = ?, genres = ?, content_warnings = ?, rating = ?,
+    `UPDATE documents SET hc_id = ?, hc_slug = ?, moods = ?, genres = CASE WHEN genres_manual THEN genres ELSE ? END, content_warnings = ?, rating = ?,
        series = ?, hc_series_id = ?, series_position = ?, release_year = ?, description = ?, hc_checked_at = ?
      WHERE user_id = ? AND document = ?`
   ).run(
@@ -227,12 +255,18 @@ export async function documentInfo(
       hc = found;
     }
   }
+  // Hardcover's print page count is the stats source of truth, even when the
+  // cover lookup below is still cached.
+  if (!row.page_count && hc?.pages) {
+    row.page_count = hc.pages;
+    db.prepare('UPDATE documents SET page_count = ? WHERE user_id = ? AND document = ?').run(hc.pages, userId, document);
+  }
   const cached = { cover: row.cover_url, pages: row.page_count };
   if ((row.cover_url && row.page_count) || (row.cover_checked_at && nowSeconds() - row.cover_checked_at < RETRY_AFTER)) {
     return cached;
   }
   const found = want
-    ? await findBookInfo(http, want.title, want.author, env, { cover: hc?.cover, pages: hc?.pages })
+    ? await sharedBookInfo(db, http, want.title, want.author, env, { cover: hc?.cover, pages: hc?.pages })
     : { cover: null, pages: null };
   const info = { cover: row.cover_url ?? found.cover, pages: row.page_count ?? found.pages };
   db.prepare(

@@ -94,6 +94,7 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
     "filename": "Foundryside - Robert Jackson Bennett.epub",
     "title": "Foundryside",
     "authors": "Robert Jackson Bennett",
+    "language": "en",
     "bookfusion_id": "36835"
   }
   ```
@@ -101,6 +102,10 @@ Validates credentials. `200 {"authorized": "OK"}` or `401`.
   All fields optional strings (≤512 chars). `filename`/`title`/`authors` are stored per
   `(user, document)`; fields the client omits never overwrite previously stored values. Retrieve
   via `GET /api/v1/documents` or joined into `GET /api/v1/progress`.
+
+  **Language.** `language` is the EPUB's `dc:language` as a BCP 47 tag (`"ja"`, `"de-DE"`). It
+  only fills a blank, so a language set by hand through `PUT /api/v1/documents/{document}/info`
+  stays. A value that isn't a language tag is ignored; the sync itself still succeeds.
 
   **Service ids.** Any extra `<service>_id` field (from a CrossPoint plugin's book sidecar,
   e.g. `bookfusion_id`) pre-seeds an exact match for the connector of that name: progress is
@@ -216,6 +221,12 @@ The kosync body plus a `position` object mapping 1:1 to the firmware's `CompactP
 | xpath  | string ≤ 120 bytes, optional | KOReader-style xpath |
 
 Response: `{"document": "...", "timestamp": 1752345678}`.
+
+An optional `timestamp` (unix seconds) says when the position was read, for clients that sync
+later than they read. The stored time, the reading timeline and "newest wins" then use it instead
+of the time of the request. A time in the future is capped at now; a missing one, or one before
+2000, means now. `PUT /syncs/progress` and the batch route always use the time of the request, so
+a reader with an unset clock can't backdate itself.
 
 An invalid `position` is ignored (the kosync fields still sync); a missing `position` on a later
 PUT keeps the previously stored one for that device.
@@ -433,6 +444,41 @@ Model (matches the firmware's nearby P2P stats sync): **each device uploads its 
 snapshots replace, never accumulate; the server aggregates across devices on read.** Never merge
 another device's stats into local ones.
 
+BookOrbit reading sessions are imported separately for matched books already known to Sync,
+including their complete historical session lists. Existing links are picked up automatically;
+linking or **Sync now** starts a background pass. The worker continues every minute, processes up
+to three books and five 100-session pages per book per pass, and refreshes completed imports hourly.
+It also tries matching up to three older/finished local books per pass. Books that exist only in
+BookOrbit are not added to the Sync library by this import.
+
+A book's new totals become visible only after all its pages have been validated. Session IDs
+deduplicate retries and duplicate book matches. Full reconciliation replaces edited/deleted
+sessions; failed requests retain the last complete import. Reading time, session counts, daily
+time, history, and time/day histograms join the existing stats responses as a virtual
+`connector:bookorbit` device named `BookOrbit`. Page counts and completed-book counts are not
+inferred from session durations. Calendar days use the BookOrbit account's timezone (UTC fallback),
+splitting sessions across local midnight; historical daily rows are retained beyond the bitmap's
+730-day window.
+
+**Overlap policy:** include every BookOrbit source, including KOReader on Kindle, Kobo,
+manual entries, and missing/unknown sources, alongside direct device stats. Having a device
+snapshot, the same reading date, or an equal duration is not evidence of a duplicate.
+Repeated BookOrbit session IDs count once. Rows with different IDs also count once when the
+external book ID, source, start timestamp, end timestamp, and duration all match exactly.
+Entries without a positive time span are matched only by session ID. Different books, different
+sources, and partial time overlaps remain separate. Original imported rows are retained.
+
+Direct device snapshots contain cumulative totals without session IDs, source provenance, or
+time intervals. They cannot prove overlap with a BookOrbit session, so no cross-source subtraction
+is guessed. If the same physical device's stats are independently uploaded directly and through
+BookOrbit, overlap between those channels still cannot be resolved automatically with this
+contract. Sync does not export reading stats to BookOrbit, so there is no stats export/import loop.
+The stats responses include `bookorbit: { excluded_sessions, excluded_seconds, reason }` for
+identifiable repeated records only; the app explains when such duplicates were counted once.
+Imported time is never converted into progress-log entries or extra page/sync counts.
+Unlinking removes imported stats; relinking clears the old import, and changing
+the BookOrbit server/user also clears stale matches, queued exports, and EPUB maps.
+
 #### PUT /api/v1/stats/global
 
 The device's `GlobalReadingStats` as JSON:
@@ -456,6 +502,54 @@ The device's `GlobalReadingStats` as JSON:
 - `streak` = device-reported all-time longest streak (may predate the bitmap window).
 
 Response: `{"until": 1752345678}`.
+
+#### PUT /api/v1/stats/sessions
+
+Uploads measured reading-session checkpoints alongside the existing counters.
+
+```json
+{"device_id":"reader-id","items":[{"session_id":"stable-session-id","document":"0123456789abcdef0123456789abcdef","started_at":1609502400,"ended_at":1609503000,"seconds":600,"utc_offset_minutes":0}]}
+```
+
+Accepts 1–20 records. IDs are scoped to the authenticated user and device;
+`session_id` is 1–64 ASCII letters, digits, `_` or `-`, and `document` is a
+32-hex reader document ID. Timestamps are integer Unix UTC seconds; the offset
+records the device's local timezone at capture. Active seconds must be at least
+10, no greater than the wall-clock span, and the span cannot exceed seven days.
+Future timestamps beyond five minutes are rejected. Undated reading remains in
+legacy counters and is not manufactured into dated sessions.
+
+Checkpoints retain their ID and original book, start, and timezone. Later
+checkpoints may increase both duration and end time; exact or older checkpoints
+are acknowledged without decreasing stored values. Inconsistent identities or
+mixed-direction updates reject the complete batch.
+
+Returns `{"until":1609503100,"accepted_session_ids":["stable-session-id"]}`.
+Readers must verify the specific acknowledged IDs before clearing their outbox.
+HTTP success or an old server's generic stats response alone is insufficient.
+
+CrossInk keeps session capture in RAM and writes it at existing reader save points
+(progress saves, sleep/exit, tracking disable and restart handoffs), without an
+additional per-minute session timer or extra book/global counter snapshots.
+Stable IDs still allow cumulative updates at successive save points.
+
+Sessions do **not** add to device totals, book totals, daily counters, or streaks:
+those existing snapshots remain authoritative. Linked, enabled BookOrbit accounts
+export measured sessions for matched books in bounded background passes. A stable
+provider ID makes timeout retries and later checkpoints update the same session.
+Old aggregate history remains intact; it is not converted into invented sessions.
+XTC stats-only uploads require an existing/manual match because they carry no
+book title or author metadata.
+
+BookOrbit currently returns numeric IDs rather than the submitted client ID.
+Sync saves a complete preflight ID boundary, verifies the new exact row after
+upload, and retains its numeric ownership mapping across unlink/relink. An
+uncertain initial export defers that book's history reconciliation while keeping
+the previous published history. Verified exported rows are excluded individually
+from imported stats; independent Kindle/other reader sessions remain included.
+BookOrbit's current client API records these exports as `web` reading sessions.
+Export errors appear with the connector's `queue_errors` and retry in the
+background (or on **Sync now**). Account switches use separate ownership mappings.
 
 #### PUT /api/v1/stats/books
 
@@ -491,6 +585,25 @@ Server-side aggregate across all of the user's devices:
   "devices": [{"device_id": "A1B2C3D4", "device": "CrossInk", "updated_at": 1752345678}]
 }
 ```
+
+#### GET /api/v1/stats/overview?tz=&days=
+
+A small digest for readers that want to show the account's totals on the device. It has the same numbers
+the Stats page shows, from every source: syncs, chosen start and finish dates, and device stats.
+
+```json
+{"anchor_day": 9793, "days": 365, "history_b64": "...", "reading_days": 53,
+ "current_streak": 2, "longest_streak": 6, "books_finished": 496, "finished_this_year": 31,
+ "pages_read": 142177, "seconds": 2880, "sessions": 0, "today_seconds": 420, "week_seconds": 2880}
+```
+
+- `tz` is the caller's UTC offset in minutes as JS `getTimezoneOffset()` gives it. It decides what "today" and "this year" are.
+- `anchor_day` is today, as days since 2000-01-01. In `history_b64`, bit N (LSB-first per byte) is set when day
+  `anchor_day - N` was a reading day. The bitmap covers the last `days` days (default 365, at most 3650), so
+  the response stays a few hundred bytes.
+- All the counts cover the whole history, whatever `days` is: `reading_days`, the streaks, the finished counts and the pages.
+  The time fields come from device stats: `seconds`, `sessions`, `today_seconds`, and `week_seconds` for the
+  last 7 days including today.
 
 #### GET /api/v1/stats/global
 
@@ -540,9 +653,12 @@ the server has `GOOGLE_BOOKS_API_KEY`, then Amazon's "Print length" via SearchAP
 
 #### PUT /api/v1/documents/{document}/info
 
-Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433}` (either
-field optional). Manual values stick, since lookups only fill blanks; `null` clears a field so it's
-looked up again. Returns the stored `{document, cover_url, page_count}`.
+Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433,
+"genres": ["Fantasy", "Heist"]}` (every field optional). Manual values stick, since lookups only fill
+blanks and Hardcover's lookup leaves manual genres alone; `null` clears a field so it's looked up
+again. `genres` takes up to 10 names of at most 64 characters. `language` (a BCP 47 tag) can be set
+the same way and then stays over device syncs; `null` clears it so the next device sync fills it
+again. Returns the stored `{document, cover_url, page_count, title, author, language, genres}`.
 
 #### GET /api/v1/documents/{document}/cover/candidates?q=
 
@@ -600,7 +716,7 @@ Lists available connectors and this account's link status.
     {"id": "hardcover", "name": "Hardcover", "tier": 1, "beta": false,
      "carries": ["progress", "finished"], "capabilities": {"read": false, "write": true},
      "credential_kind": "token", "linked": true, "status": "ok", "account": "julia",
-     "queue": {"pending": 0, "dead": 0}},
+     "queue": {"pending": 0, "dead": 0}, "queue_errors": []},
     {"id": "readwise", "name": "Readwise", "tier": 1, "beta": false,
      "carries": ["highlight"], "capabilities": {"read": true, "write": true},
      "credential_kind": "token", "linked": false, "status": null, "account": null}
@@ -667,6 +783,21 @@ matched book — for per-book providers.
 BookOrbit also pulls highlights on that refresh: each one is placed by its CFI in BookOrbit's copy of
 the EPUB and stored as a clipping (chapter codepoint offsets, firmware-style id), skipped when the same
 quote is already a clipping on the book, live or deleted.
+
+For outgoing BookOrbit clippings, older records without text offsets are located by their full
+quote in BookOrbit's EPUB. Whitespace, soft hyphens, and straight/curly quotation-mark differences are ignored; the match must be
+unique across the whole book. Missing or ambiguous quotes fail explicitly rather than guessing
+a location. When the formatting comparison finds nothing, long quotes (at least 40 characters
+after normalization) can match with case and punctuation differences ignored, again requiring
+the entire quote to be unique. Short selections remain strict. Clippings with offsets continue
+to use their exact saved positions and text checks.
+
+The connector list includes `queue_errors: [{kind, message, count}]` for linked services: up to
+three recent grouped failures for that user's service, including pending retries and permanently
+failed items. Completed items no longer contribute errors. Settings shows waiting/failed counts
+and these messages, refreshing every five seconds while work is pending. The "Sync now" response's
+`queued` value counts export items (progress and individual clippings), not distinct books or
+successful deliveries. "Sync now" also requeues failed items for another attempt.
 
 ### GET /healthz
 

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
+import { initializeNavigation } from './tabbar.js'
 // Fonts ship with the app (Android's WebView couldn't load them from Google Fonts).
 import '@fontsource-variable/inter'
 import '@fontsource/lora/400.css'
@@ -19,11 +20,13 @@ document.addEventListener('focusin', (e) => {
   }
 })
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-)
+initializeNavigation().then(() => {
+  createRoot(document.getElementById('root')).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  )
 
-// Android keeps the system splash up until the app has painted its first frame.
-requestAnimationFrame(() => requestAnimationFrame(() => window.CrossPointTheme?.ready?.()))
+  // Android keeps the system splash up until the app has painted its first frame.
+  requestAnimationFrame(() => requestAnimationFrame(() => window.CrossPointTheme?.ready?.()))
+})

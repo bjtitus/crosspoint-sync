@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeTestApp, registerUser } from './helpers.js';
+import { md5Hex } from '../src/auth/password.js';
 
 const KOBO_DOC = '27593cefaf3a602cf410ecf5da4652e2';
 const CP_DOC = '76166bb603f5121c19c308c64a8d5c73';
@@ -217,5 +218,49 @@ describe('document merge stats', () => {
     const { app, db, headers } = await statsSetup();
     await app.request(`/api/v1/progress/${CP_DOC}`, { method: 'DELETE', headers });
     expect(db.prepare('SELECT * FROM stats_device_book').all()).toHaveLength(0);
+  });
+});
+
+describe('filename twin adoption', () => {
+  // CP_DOC stands in for MD5('book.epub'), KOBO_DOC for the binary hash.
+  const FILE = 'book.epub';
+  const FILE_DOC = md5Hex(FILE);
+  const docs = (db: ReturnType<typeof makeTestApp>['db']) =>
+    db.prepare('SELECT DISTINCT document FROM progress').all().map((r) => (r as { document: string }).document);
+
+  it('a filename-hash push lands on the binary-hash book that has that filename', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    await putProgress(app, headers, { document: KOBO_DOC, progress: 'a', percentage: 0.4, device_id: 'cp', metadata: { filename: FILE } });
+    const res = await putProgress(app, headers, { document: FILE_DOC, progress: 'b', percentage: 0.45, device_id: 'cp' });
+    expect(((await res.json()) as { document: string }).document).toBe(FILE_DOC);
+    expect(docs(db)).toEqual([KOBO_DOC]);
+  });
+
+  it('a binary-hash push with a filename lands on that filename hash book', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    await putProgress(app, headers, { document: FILE_DOC, progress: 'a', percentage: 0.4, device_id: 'cp' });
+    await putProgress(app, headers, { document: KOBO_DOC, progress: 'b', percentage: 0.45, device_id: 'cp', metadata: { filename: FILE } });
+    expect(docs(db)).toEqual([FILE_DOC]);
+  });
+
+  it('leaves an unrelated new book alone', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    await putProgress(app, headers, { document: KOBO_DOC, progress: 'a', percentage: 0.4, device_id: 'cp', metadata: { filename: FILE } });
+    await putProgress(app, headers, { document: CP_DOC, progress: 'b', percentage: 0.1, device_id: 'cp', metadata: { filename: 'other.epub' } });
+    expect(docs(db).sort()).toEqual([KOBO_DOC, CP_DOC].sort());
+  });
+
+  it('a merge unpauses a book read since it was paused', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    await putProgress(app, headers, { document: KOBO_DOC, progress: 'a', percentage: 0.4, device_id: 'kobo' });
+    await app.request(`/api/v1/documents/${KOBO_DOC}/status`, { method: 'PUT', headers, body: JSON.stringify({ status: 'paused' }) });
+    db.prepare('UPDATE documents SET status_at = status_at - 60').run();
+    await putProgress(app, headers, { document: CP_DOC, progress: 'b', percentage: 0.45, device_id: 'cp' });
+    await app.request('/api/v1/documents/merge', { method: 'POST', headers, body: JSON.stringify({ document: CP_DOC, into: KOBO_DOC }) });
+    expect(db.prepare('SELECT status FROM documents WHERE document = ?').get(KOBO_DOC)).toEqual({ status: null });
   });
 });

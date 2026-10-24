@@ -27,6 +27,14 @@ export type AppEnv = {
   };
 };
 
+/**
+ * Every account matching a username case-insensitively, exact case first. Bind
+ * the username twice. Accounts differing only by case exist from before
+ * usernames were lowercased, so callers try each row's key rather than the first.
+ */
+export const USERS_BY_NAME_SQL =
+  'SELECT * FROM users WHERE lower(username) = lower(?) ORDER BY username = ? DESC, id';
+
 /** kosync-style error bodies; firmware already parses these shapes. */
 export function kosyncError(c: Context, status: 401 | 402 | 403, code: number, message: string) {
   return c.json({ code, message }, status);
@@ -55,28 +63,29 @@ function logAuthFailure(username: string, key: string, reason: string): void {
 }
 
 export function authMiddleware(db: DB): MiddlewareHandler<AppEnv> {
-  const getUser = db.prepare('SELECT id, username, key_hash FROM users WHERE username = ?');
+  const getUsers = db.prepare(USERS_BY_NAME_SQL);
   return async (c, next) => {
     const username = c.req.header('x-auth-user');
     const key = c.req.header('x-auth-key');
     if (!username || !key) {
       return kosyncError(c, 401, 2001, 'Unauthorized');
     }
-    const row = (getUser.get(username) ?? getUser.get(username.toLowerCase())) as
-      | { id: number; username: string; key_hash: string }
-      | undefined;
-    if (!row) {
+    const rows = getUsers.all(username, username) as { id: number; username: string; key_hash: string }[];
+    if (rows.length === 0) {
       logAuthFailure(username, key, 'no such user');
       return kosyncError(c, 401, 2001, 'Unauthorized');
     }
+    // Stock kosync clients send x-auth-key as MD5(password); some third-party
+    // clients (e.g. BookOrbit) send the raw password. Stored hashes are always
+    // PBKDF2 of the MD5 form, so fall back to hashing the key before rejecting.
+    const row = rows.find(
+      (r) => verifiedCache.get(r.username) === key || verifyKey(key, r.key_hash) || verifyKey(md5Hex(key), r.key_hash)
+    );
+    if (!row) {
+      logAuthFailure(username, key, 'wrong key');
+      return kosyncError(c, 401, 2001, 'Unauthorized');
+    }
     if (verifiedCache.get(row.username) !== key) {
-      // Stock kosync clients send x-auth-key as MD5(password); some third-party
-      // clients (e.g. BookOrbit) send the raw password. Stored hashes are always
-      // PBKDF2 of the MD5 form, so fall back to hashing the key before rejecting.
-      if (!verifyKey(key, row.key_hash) && !verifyKey(md5Hex(key), row.key_hash)) {
-        logAuthFailure(username, key, 'wrong key');
-        return kosyncError(c, 401, 2001, 'Unauthorized');
-      }
       if (verifiedCache.size >= VERIFIED_CACHE_MAX) {
         verifiedCache.clear();
       }

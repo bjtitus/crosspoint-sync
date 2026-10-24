@@ -505,6 +505,69 @@ export async function epubRangeCfi(
   });
 }
 
+/** Formatting differences between a reader's saved quote and the publisher's text. */
+export function normalizeEpubQuote(value: string): string {
+  return value.replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[\s\u00ad]+/g, '');
+}
+
+/** Locate an older clipping without offsets only when its full quote is unique in the EPUB. */
+export async function epubQuoteRangeCfi(bytes: Epub, quote: string): Promise<{ cfi: string; text: string }> {
+  const book = bytes instanceof Map ? bytes : await textEntries(bytes);
+  let found = await findQuoteRange(book, quote, normalizeEpubQuote);
+  // Older editions can differ in quotation style, capitalization and punctuation
+  // (e.g. can't / ca'n't). A long, complete quote is still a useful anchor, but
+  // never apply this looser comparison to a short selection or an ambiguous quote.
+  const typography = (value: string) => Array.from(value, ch => /[\s\u00ad\p{P}]/u.test(ch) ? '' : ch.toLowerCase()).join('');
+  if (!found && Array.from(typography(quote)).length >= 40) found = await findQuoteRange(book, quote, typography);
+  if (!found) invalid('clipping text not found in the BookOrbit copy of the book');
+  return epubRangeCfi(book, found.spine, found.start, found.end);
+}
+
+async function findQuoteRange(
+  book: TextEpub, quote: string, normalize: (value: string) => string
+): Promise<{ spine: number; start: number; end: number } | undefined> {
+  const needle = normalize(quote);
+  if (!needle) invalid('clipping text is empty');
+  let chapterCount = 1;
+  let found: { spine: number; start: number; end: number } | undefined;
+  for (let index = 0; index < chapterCount; index++) {
+    const chapter = await withChapter(book, (_opf, _spine, items) => {
+      chapterCount = items.length;
+      return index;
+    }, ({ body }) => {
+      let offset = 0;
+      const characters: string[] = [];
+      // JS string indexes are UTF-16; saved clipping offsets count Unicode codepoints.
+      const offsets: number[] = [];
+      const visit = (node: Node) => {
+        for (const c of children(node)) {
+          if (c.nodeType === 1) {
+            if (!NON_VISIBLE.has(((c as Element).localName ?? '').toLowerCase())) visit(c);
+          } else if (text(c)) {
+            for (const ch of c.nodeValue ?? '') {
+              const normalized = normalize(ch);
+              if (normalized) {
+                characters.push(normalized);
+                for (let unit = 0; unit < normalized.length; unit++) offsets.push(offset);
+              }
+              offset++;
+            }
+          }
+        }
+      };
+      visit(body);
+      return { normalized: characters.join(''), offsets };
+    });
+    const at = chapter.normalized.indexOf(needle);
+    if (at < 0) continue;
+    if (found || chapter.normalized.indexOf(needle, at + 1) >= 0) {
+      invalid('clipping text appears more than once in the BookOrbit copy of the book');
+    }
+    found = { spine: index, start: chapter.offsets[at], end: chapter.offsets[at + needle.length - 1] + 1 };
+  }
+  return found;
+}
+
 /**
  * Chapter codepoint offsets for a range CFI: the inverse of epubRangeCfi, so a
  * provider's highlight becomes a CrossPoint clipping. Returns the canonical CFI

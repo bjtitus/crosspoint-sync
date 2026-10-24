@@ -22,17 +22,19 @@ import {
 import { isApp } from './api.js'
 import { DEFAULT_HOST, EXTENSIONS, connect, deleteFiles, folders, isBook, joinPath, listFiles, loadDevicePrefs, makeFolder, renameFile, saveDevicePrefs } from './device.js'
 import { downloads as listDownloads, removeDownload, sendDownload, sendFile } from './catalogs.js'
-import { Card, EmptyState, Eyebrow, folderLabel, notify, Toggle } from './ui.jsx'
+import { ActionSheet, Card, EmptyState, folderLabel, notify, Toggle } from './ui.jsx'
+import ConversionLog from './ConversionLog.jsx'
+import { transferProgress } from './epub/log.js'
 
 const size = (n) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 // Android's picker filters by MIME type and has none for .md, so let it show everything there.
 const ACCEPT = /android/i.test(navigator.userAgent) ? undefined : EXTENSIONS.map((e) => `.${e}`).join(',')
 
-// Shared "what's happening" line for a send, from Rust progress events.
+// Shared progress from the WebView optimizer and native transfers.
 export function progressLabel(p) {
   if (!p) return 'Sending…'
   if (p.stage === 'downloading') return p.total ? `Downloading ${Math.round((p.done / p.total) * 100)}%` : `Downloading ${size(p.done)}`
-  if (p.stage === 'optimizing') return p.total ? `Shrinking images ${p.done}/${p.total}` : 'Shrinking images…'
+  if (p.stage === 'optimizing') return p.total ? `Optimizing EPUB ${Math.round(p.done / p.total * 100)}%` : 'Optimizing EPUB…'
   return 'Sending to reader…'
 }
 
@@ -64,97 +66,100 @@ function Device({ prefs, setPrefs, device, onRetry }) {
         </button>
       </div>
 
-      <div className="mt-4 grid gap-3 border-t border-stone-100 pt-4 sm:grid-cols-2">
-        <label className="block text-xs font-medium text-stone-500">
-          Save to folder
-          <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-stone-50 px-3 ring-1 ring-stone-950/10">
-            <Folder className="size-4 text-stone-400" />
-            <select
-              value={prefs.folder}
-              onChange={(e) => setPrefs({ ...prefs, folder: e.target.value })}
-              className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none"
-            >
-              {[...new Set(['/', ...dirs.map((d) => `/${d}`), prefs.folder])].map((f) => (
-                <option key={f} value={f}>
-                  {f === '/' ? 'SD card (top level)' : f}
-                </option>
-              ))}
-            </select>
-          </div>
-        </label>
-        <div className="text-xs font-medium text-stone-500">
-          Reader address
-          {editing ? (
-            <form
-              className="mt-1 flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault()
-                setPrefs({ ...prefs, host: host.trim() || DEFAULT_HOST })
-                setEditing(false)
-              }}
-            >
-              <input
-                autoFocus
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="crosspoint.local or 192.168.1.40"
-                inputMode="url"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                className="h-11 min-w-0 flex-1 rounded-xl bg-surface px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60"
-              />
-              <button className="h-11 rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white">Save</button>
-            </form>
-          ) : (
-            <button
-              onClick={() => setEditing(true)}
-              className="mt-1 flex h-11 w-full items-center justify-between rounded-xl bg-stone-50 px-3 font-mono text-sm text-stone-700 ring-1 ring-stone-950/10"
-            >
-              {prefs.host}
-              <span className="font-sans text-xs font-semibold text-brand-600">Change</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-4 border-t border-stone-100 pt-4">
-        <div className="flex items-center gap-3">
-          <ImageDown className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-stone-900">Shrink EPUB images</p>
-            <p className="text-xs/5 text-stone-500">Re-encodes pictures as JPEG so books take less space and open faster.</p>
-          </div>
-          <Toggle label="Shrink EPUB images" checked={prefs.optimize} onChange={(optimize) => setPrefs({ ...prefs, optimize })} />
-        </div>
-        {prefs.optimize && (
-          <label className="mt-3 flex items-center gap-3 pl-8 text-xs text-stone-500">
-            Quality
-            <input
-              type="range"
-              min="30"
-              max="95"
-              step="5"
-              value={prefs.quality}
-              onChange={(e) => setPrefs({ ...prefs, quality: Number(e.target.value) })}
-              className="flex-1 accent-brand-500"
-            />
-            <span className="w-8 text-right font-mono text-stone-700">{prefs.quality}</span>
+      <details className="mt-3 border-t border-stone-200">
+        <summary className="cursor-pointer py-3 text-sm font-medium text-stone-600">Transfer settings · {folderLabel(prefs.folder)}</summary>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <label className="block text-xs font-medium text-stone-500">
+            Save to folder
+            <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-stone-50 px-3 ring-1 ring-stone-950/10">
+              <Folder className="size-4 text-stone-400" />
+              <select
+                value={prefs.folder}
+                onChange={(e) => setPrefs({ ...prefs, folder: e.target.value })}
+                className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none"
+              >
+                {[...new Set(['/', ...dirs.map((d) => `/${d}`), prefs.folder])].map((f) => (
+                  <option key={f} value={f}>
+                    {f === '/' ? 'SD card (top level)' : f}
+                  </option>
+                ))}
+              </select>
+            </div>
           </label>
-        )}
-        <div className="mt-4 flex items-center gap-3">
-          <FilePen className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-stone-900">Rename from book metadata</p>
-            <p className="text-xs/5 text-stone-500">Use Title - Author.epub when available.</p>
+          <div className="text-xs font-medium text-stone-500">
+            Reader address
+            {editing ? (
+              <form
+                className="mt-1 flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  setPrefs({ ...prefs, host: host.trim() || DEFAULT_HOST })
+                  setEditing(false)
+                }}
+              >
+                <input
+                  autoFocus
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  placeholder="crosspoint.local or 192.168.1.40"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="h-11 min-w-0 flex-1 rounded-xl bg-surface px-3 text-sm text-stone-900 ring-1 ring-stone-950/10 outline-none focus:ring-2 focus:ring-brand-500/60"
+                />
+                <button className="h-11 rounded-xl bg-brand-500 px-4 text-sm font-semibold text-white">Save</button>
+              </form>
+            ) : (
+              <button
+                onClick={() => setEditing(true)}
+                className="mt-1 flex h-11 w-full items-center justify-between rounded-xl bg-stone-50 px-3 font-mono text-sm text-stone-700 ring-1 ring-stone-950/10"
+              >
+                {prefs.host}
+                <span className="font-sans text-xs font-semibold text-brand-600">Change</span>
+              </button>
+            )}
           </div>
-          <Toggle
-            label="Rename from book metadata"
-            checked={prefs.renameFromMetadata}
-            onChange={(renameFromMetadata) => setPrefs({ ...prefs, renameFromMetadata })}
-          />
         </div>
-      </div>
+
+        <div className="mt-4 border-t border-stone-100 pt-4">
+          <div className="flex items-center gap-3">
+            <ImageDown className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-stone-900">Optimize EPUB</p>
+              <p className="text-xs/5 text-stone-500">Fits images to your reader in grayscale, fixes SVG covers, and removes embedded fonts.</p>
+            </div>
+            <Toggle label="Optimize EPUB" checked={prefs.optimize} onChange={(optimize) => setPrefs({ ...prefs, optimize })} />
+          </div>
+          {prefs.optimize && (
+            <label className="mt-3 flex items-center gap-3 pl-8 text-xs text-stone-500">
+              Quality
+              <input
+                type="range"
+                min="30"
+                max="95"
+                step="5"
+                value={prefs.quality}
+                onChange={(e) => setPrefs({ ...prefs, quality: Number(e.target.value) })}
+                className="flex-1 accent-brand-500"
+              />
+              <span className="w-8 text-right font-mono text-stone-700">{prefs.quality}</span>
+            </label>
+          )}
+          <div className="mt-4 flex items-center gap-3">
+            <FilePen className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-stone-900">Rename from book metadata</p>
+              <p className="text-xs/5 text-stone-500">Use Title - Author.epub when available.</p>
+            </div>
+            <Toggle
+              label="Rename from book metadata"
+              checked={prefs.renameFromMetadata}
+              onChange={(renameFromMetadata) => setPrefs({ ...prefs, renameFromMetadata })}
+            />
+          </div>
+        </div>
+      </details>
     </Card>
   )
 }
@@ -185,9 +190,9 @@ function Shelf({ prefs, ready }) {
 
   async function send(name) {
     const set = (patch) => setJobs((j) => ({ ...j, [name]: { ...j[name], ...patch } }))
-    set({ state: 'sending', error: null, progress: null })
+    set({ state: 'sending', error: null, progress: null, logs: [] })
     try {
-      const used = await sendDownload(name, prefs, (progress) => set({ progress }))
+      const used = await sendDownload(name, prefs, (event) => setJobs((jobs) => ({ ...jobs, [name]: transferProgress(jobs[name], event) })))
       set({ state: 'done', sentAs: used !== name ? used : null })
       notify({ title: 'Sent to your reader', detail: `${used} in ${folderLabel(prefs.folder)}` })
     } catch (e) {
@@ -203,38 +208,47 @@ function Shelf({ prefs, ready }) {
         {books.map((b) => {
           const job = jobs[b.name] ?? {}
           return (
-            <div key={b.name} className="flex items-center gap-3 px-4 py-3">
-              {b.meta?.cover ? (
-                <img src={b.meta.cover} alt="" className="aspect-[2/3] w-10 shrink-0 rounded object-cover ring-1 ring-stone-950/10" />
-              ) : (
-                <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-stone-900">{b.meta?.title ?? b.name}</p>
-                <p className="truncate text-xs text-stone-500">
-                  {job.state ? <Status {...job} /> : [b.meta?.author, size(b.size)].filter(Boolean).join(' · ')}
-                </p>
-              </div>
-              {job.state && job.state !== 'error' ? (
-                <StatusIcon state={job.state} />
-              ) : (
-                <>
-                  <button
-                    disabled={!ready}
-                    onClick={() => send(b.name)}
-                    className="flex h-9 items-center gap-1.5 rounded-full bg-brand-50 px-3 text-sm font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40"
-                  >
-                    <SendIcon className="size-4" /> Send
-                  </button>
-                  <button
-                    onClick={() => removeDownload(b.name).then(reload)}
-                    className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
-                    aria-label={`Delete ${b.name}`}
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </>
-              )}
+            <div key={b.name} className="px-4 py-3">
+              <ConversionLog entries={job.logs}>
+                {(details) => (
+                  <div className="flex items-center gap-3">
+                    {b.meta?.cover ? (
+                      <img src={b.meta.cover} alt="" className="aspect-[2/3] w-10 shrink-0 rounded object-cover ring-1 ring-stone-950/10" />
+                    ) : (
+                      <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-stone-900">{b.meta?.title ?? b.name}</p>
+                      <p className="flex min-w-0 items-center text-xs text-stone-500">
+                        <span className="truncate">
+                          {job.state ? <Status {...job} /> : [b.meta?.author, size(b.size)].filter(Boolean).join(' · ')}
+                        </span>
+                        {details}
+                      </p>
+                    </div>
+                    {job.state && job.state !== 'error' ? (
+                      <StatusIcon state={job.state} />
+                    ) : (
+                      <>
+                        <button
+                          disabled={!ready}
+                          onClick={() => send(b.name)}
+                          className="flex h-9 items-center gap-1.5 rounded-full bg-brand-50 px-3 text-sm font-semibold text-brand-700 active:bg-brand-100 disabled:opacity-40"
+                        >
+                          <SendIcon className="size-4" /> Send
+                        </button>
+                        <button
+                          onClick={() => removeDownload(b.name).then(reload)}
+                          className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                          aria-label={`Delete ${b.name}`}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </ConversionLog>
             </div>
           )
         })}
@@ -247,16 +261,19 @@ function Shelf({ prefs, ready }) {
 function ReaderFiles({ base, onFoldersChanged }) {
   const [path, setPath] = useState('/')
   const [files, setFiles] = useState(null)
-  const [error, setError] = useState(null)
+  const [listError, setListError] = useState(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
+  const [deleting, setDeleting] = useState(null)
+  const [renaming, setRenaming] = useState(null)
+  const [creatingIn, setCreatingIn] = useState(null)
   useEffect(() => {
     let live = true
     setFiles(null)
-    setError(null)
+    setListError(null)
     listFiles(base, path).then(
       (f) => live && setFiles(f),
-      (e) => live && setError(e.message)
+      (e) => live && setListError(e.message)
     )
     return () => {
       live = false
@@ -265,48 +282,43 @@ function ReaderFiles({ base, onFoldersChanged }) {
 
   async function run(fn, foldersChanged) {
     setBusy(true)
-    setError(null)
     try {
       await fn()
       setTick((t) => t + 1)
       if (foldersChanged) onFoldersChanged()
-    } catch (e) {
-      setError(e.message)
     } finally {
       setBusy(false)
     }
   }
   const crumbs = path.split('/').filter(Boolean)
+  const locked = busy || !!deleting || !!renaming || creatingIn !== null
 
   return (
     <section className="mt-8">
       <div className="flex items-center justify-between gap-3">
         <h2 className="font-display text-xl font-semibold text-stone-900">On your reader</h2>
         <button
-          disabled={busy}
-          onClick={() => {
-            const name = prompt('New folder name')?.trim()
-            if (name) run(() => makeFolder(base, path, name), true)
-          }}
+          disabled={locked}
+          onClick={() => setCreatingIn(path)}
           className="flex h-9 items-center gap-1.5 rounded-full bg-surface px-3 text-sm font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100"
         >
           <FolderPlus className="size-4" /> New folder
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1 text-sm">
-        <button onClick={() => setPath('/')} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
+        <button disabled={locked} onClick={() => setPath('/')} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
           SD card
         </button>
         {crumbs.map((c, i) => (
           <span key={i} className="flex items-center gap-1">
             <ChevronRight className="size-3.5 text-stone-300" />
-            <button onClick={() => setPath(`/${crumbs.slice(0, i + 1).join('/')}`)} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
+            <button disabled={locked} onClick={() => setPath(`/${crumbs.slice(0, i + 1).join('/')}`)} className="rounded-md px-1.5 py-0.5 font-medium text-brand-600 active:bg-stone-100">
               {c}
             </button>
           </span>
         ))}
       </div>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {listError && <p className="mt-2 text-sm text-red-600">{listError}</p>}
       <Card className="mt-3 divide-y divide-stone-100">
         {!files ? (
           <div className="py-6">
@@ -320,7 +332,7 @@ function ReaderFiles({ base, onFoldersChanged }) {
             return (
               <div key={f.name} className="flex items-center gap-3 px-4 py-2.5">
                 <button
-                  disabled={!f.isDirectory}
+                  disabled={locked || !f.isDirectory}
                   onClick={() => setPath(full)}
                   className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
@@ -331,22 +343,16 @@ function ReaderFiles({ base, onFoldersChanged }) {
                   </span>
                 </button>
                 <button
-                  disabled={busy}
-                  onClick={() => {
-                    const name = prompt(`Rename "${f.name}" to`, f.name)?.trim()
-                    if (name && name !== f.name) run(() => renameFile(base, full, name), f.isDirectory)
-                  }}
+                  disabled={locked}
+                  onClick={() => setRenaming({ ...f, path: full })}
                   className="grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
                   aria-label={`Rename ${f.name}`}
                 >
                   <Pencil className="size-4" />
                 </button>
                 <button
-                  disabled={busy}
-                  onClick={() =>
-                    confirm(`Delete "${f.name}"${f.isDirectory ? ' and everything in it' : ''} from your reader?`) &&
-                    run(() => deleteFiles(base, [full]), f.isDirectory)
-                  }
+                  disabled={locked}
+                  onClick={() => setDeleting({ ...f, path: full })}
                   className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
                   aria-label={`Delete ${f.name}`}
                 >
@@ -357,6 +363,40 @@ function ReaderFiles({ base, onFoldersChanged }) {
           })
         )}
       </Card>
+      {creatingIn !== null && (
+        <ActionSheet
+          title="New folder"
+          inputLabel="Folder name"
+          actionLabel="Create folder"
+          pendingLabel="Creating…"
+          onClose={() => setCreatingIn(null)}
+          onConfirm={(name) => run(() => makeFolder(base, creatingIn, name), true)}
+        />
+      )}
+      {renaming && (
+        <ActionSheet
+          title={`Rename ${renaming.name}`}
+          inputLabel="New name"
+          initialValue={renaming.name}
+          isValid={(value) => value !== renaming.name}
+          actionLabel="Rename"
+          pendingLabel="Renaming…"
+          onClose={() => setRenaming(null)}
+          onConfirm={(name) => run(() => renameFile(base, renaming.path, name), renaming.isDirectory)}
+        />
+      )}
+      {deleting && (
+        <ActionSheet
+          title={`Delete ${deleting.name}?`}
+          actionLabel="Delete"
+          pendingLabel="Deleting…"
+          danger
+          onClose={() => setDeleting(null)}
+          onConfirm={() => run(() => deleteFiles(base, [deleting.path]), deleting.isDirectory)}
+        >
+          {deleting.isDirectory ? 'Delete this folder from your reader? The folder must be empty.' : 'Delete this file from your reader?'}
+        </ActionSheet>
+      )}
     </section>
   )
 }
@@ -407,9 +447,9 @@ export default function Send() {
     for (const item of files) {
       if (item.state === 'done') continue
       const update = (patch) => setFiles((cur) => cur.map((f) => (f.file === item.file ? { ...f, ...patch } : f)))
-      update({ state: 'sending', error: null })
+      update({ state: 'sending', error: null, progress: null, logs: [] })
       try {
-        const used = await sendFile(item.file, prefs)
+        const used = await sendFile(item.file, prefs, (event) => setFiles((cur) => cur.map((f) => f.file === item.file ? transferProgress(f, event) : f)))
         update({ state: 'done', sentAs: used !== item.file.name ? used : null })
         sent.push(used)
       } catch (e) {
@@ -434,25 +474,10 @@ export default function Send() {
 
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <Eyebrow className="md:hidden">Send to reader</Eyebrow>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Send books</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">
-        Copy EPUB, Markdown and text files to your CrossPoint over Wi-Fi, from this device or from catalogs in Browse.
+        Send EPUB, Markdown or text files over Wi-Fi.
       </p>
-
-      <a
-        href="#/send/wallpaper"
-        className="mt-5 flex max-w-xl items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
-      >
-        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
-          <ImagePlus className="size-5" strokeWidth={1.75} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold text-stone-900">Make a sleep screen</span>
-          <span className="block truncate text-xs text-stone-500">Turn a photo into a wallpaper for your reader</span>
-        </span>
-        <ChevronRight className="size-5 text-stone-400" />
-      </a>
 
       {!isApp ? (
         <Card className="mt-6 p-4 text-sm/6 text-stone-600">
@@ -504,28 +529,37 @@ export default function Send() {
 
             {files.length > 0 && (
               <Card className="mt-4 divide-y divide-stone-100">
-                {files.map(({ file, state, error, sentAs }) => (
-                  <div key={file.name} className="flex items-center gap-3 px-4 py-3">
-                    <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-stone-900">{file.name}</p>
-                      <p className="truncate text-xs text-stone-500">
-                        {state === 'queued' ? size(file.size) : <Status state={state} error={error} sentAs={sentAs} />}
-                      </p>
-                    </div>
-                    {state === 'queued' ? (
-                      !sending && (
-                        <button
-                          onClick={() => setFiles((cur) => cur.filter((f) => f.file !== file))}
-                          className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
-                          aria-label={`Remove ${file.name}`}
-                        >
-                          <X className="size-4" />
-                        </button>
-                      )
-                    ) : (
-                      <StatusIcon state={state} />
-                    )}
+                {files.map(({ file, state, error, sentAs, progress, logs }) => (
+                  <div key={file.name} className="px-4 py-3">
+                    <ConversionLog entries={logs}>
+                      {(details) => (
+                        <div className="flex items-center gap-3">
+                          <FileText className="size-5 shrink-0 text-stone-400" strokeWidth={1.75} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-stone-900">{file.name}</p>
+                            <p className="flex min-w-0 items-center text-xs text-stone-500">
+                              <span className="truncate">
+                                {state === 'queued' ? size(file.size) : <Status state={state} error={error} sentAs={sentAs} progress={progress} />}
+                              </span>
+                              {details}
+                            </p>
+                          </div>
+                          {state === 'queued' ? (
+                            !sending && (
+                              <button
+                                onClick={() => setFiles((cur) => cur.filter((f) => f.file !== file))}
+                                className="-mr-2 grid size-9 place-items-center rounded-full text-stone-400 active:bg-stone-100"
+                                aria-label={`Remove ${file.name}`}
+                              >
+                                <X className="size-4" />
+                              </button>
+                            )
+                          ) : (
+                            <StatusIcon state={state} />
+                          )}
+                        </div>
+                      )}
+                    </ConversionLog>
                   </div>
                 ))}
               </Card>
@@ -546,6 +580,19 @@ export default function Send() {
           </div>
         </div>
       )}
+      <a
+        href="#/send/wallpaper"
+        className="mt-5 flex max-w-xl items-center gap-3 rounded-xl bg-surface px-4 py-3 shadow-sm ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50"
+      >
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+          <ImagePlus className="size-5" strokeWidth={1.75} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-stone-900">Make a sleep screen</span>
+          <span className="block truncate text-xs text-stone-500">Turn a photo into a wallpaper for your reader</span>
+        </span>
+        <ChevronRight className="size-5 text-stone-400" />
+      </a>
     </div>
   )
 }

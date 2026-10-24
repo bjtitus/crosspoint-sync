@@ -284,7 +284,7 @@ const LANDING = shell(
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
        <span class="pill">ready</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookorbit.png" alt="" width="34" height="34"><div><div class="name">BookOrbit</div>
-       <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
+       <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Import reading time and session history for matched books. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
        <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/seekquel.png" alt="" width="34" height="34"><div><div class="name">Seekquel</div>
        <div class="desc">Log your reading in Seekquel, a book tracker: where you are in each book, the books you finish, and your highlights.</div></div></div>
@@ -609,7 +609,7 @@ const HINTS = {
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
-  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Books are matched by title and author, finishing a book marks it Read, and your clippings appear as highlights in the right spot. Sign in with your BookOrbit account.',
+  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Import reading time and session history for matched books, including Kindle and other BookOrbit reader history alongside your device stats. Repeated sessions are counted once. Finishing a book marks it Read, and clippings appear as highlights. Sign in with your BookOrbit account.',
   seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You will approve the request in the Seekquel app.'
 };
 

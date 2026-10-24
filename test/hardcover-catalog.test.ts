@@ -58,6 +58,28 @@ describe('Hardcover catalog details', () => {
     expect(await searchHardcover(fake(200, other).http, 'Foundryside', 'Robert Jackson Bennett', 'k')).toBeNull();
   });
 
+  it('matches a translated title through the alternative titles', async () => {
+    const martian = [{ document: { ...HIT, title: 'The Martian', author_names: ['Andy Weir'], pages: 385,
+      alternative_titles: ['Der Marsianer', "L'uomo di Marte"] } }];
+    const book = await searchHardcover(fake(200, martian).http, "L'Uomo Di Marte", 'Andy Weir', 'k');
+    expect(book).toMatchObject({ title: 'The Martian', pages: 385 });
+  });
+
+  it('stores Hardcover pages even when the cover lookup already missed', async () => {
+    const { app, db } = makeTestApp();
+    const { username, headers } = await registerUser(app);
+    await app.request('/syncs/progress', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ document: DOC, progress: '/body/DocFragment[2]', percentage: 0.2, device: 'X4', device_id: 'x4',
+        metadata: { title: 'Foundryside', authors: 'Robert Jackson Bennett' } }),
+    });
+    const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number };
+    db.prepare('UPDATE documents SET cover_checked_at = ? WHERE user_id = ?').run(Math.floor(Date.now() / 1000), id);
+    expect((await documentInfo(db, id, DOC, fake().http, { HARDCOVER_API_KEY: 'k' }, { hardcover: true })).pages).toBe(512);
+    expect(db.prepare('SELECT page_count FROM documents WHERE user_id = ?').get(id)).toMatchObject({ page_count: 512 });
+  });
+
   it('looks each book up once across users, and backs off on 429 without caching', async () => {
     const { db } = makeTestApp();
     const busy = fake(429);

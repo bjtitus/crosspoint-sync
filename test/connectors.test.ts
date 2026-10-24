@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
-import { claimReady } from '../src/connectors/queue.js';
-import { saveMatch } from '../src/connectors/store.js';
+import { claimReady, enqueue, markFailed } from '../src/connectors/queue.js';
+import { saveMatch, upsertAccount } from '../src/connectors/store.js';
+import { fromEnv } from '../src/config.js';
 
 // A programmable fake transport. Records requests; returns queued responses by
 // URL substring match.
@@ -47,6 +48,24 @@ afterEach(() => {
 });
 
 describe('connector management API', () => {
+  it('exposes saved delivery failures only to the account that owns them', async () => {
+    const { app, db } = makeTestApp();
+    const owner = await registerUser(app);
+    const other = await registerUser(app);
+    const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(owner.username) as { id: number };
+    upsertAccount(db, id, 'bookorbit', { server: 'orbit.test', username: 'reader', password: 'pw' }, null);
+    enqueue(db, id, 'bookorbit', { kind: 'highlight', document: DOC, timestamp: 1 }, 'highlight:a', 1);
+    const [row] = claimReady(db, 1, 1);
+    markFailed(db, row, 'clipping has no position (update the reader firmware)', false, 1);
+    const list = await (await app.request('/api/v1/connectors', { headers: owner.headers })).json();
+    expect(list.connectors.find((c: { id: string }) => c.id === 'bookorbit')).toMatchObject({
+      queue: { pending: 0, dead: 1 },
+      queue_errors: [{ kind: 'clipping', count: 1, message: 'clipping has no position (update the reader firmware)' }],
+    });
+    const otherList = await (await app.request('/api/v1/connectors', { headers: other.headers })).json();
+    expect(otherList.connectors.find((c: { id: string }) => c.id === 'bookorbit').queue_errors).toBeUndefined();
+  });
+
   it('lists connectors with encryption status and unlinked state', async () => {
     const fake = fakeTransport();
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
@@ -192,6 +211,37 @@ describe('connector management API', () => {
 
     expect(res.status).toBe(400);
     expect(fake.calls).toHaveLength(0);
+  });
+
+  it.each([
+    { name: 'unconfigured HTTPS proxy', env: {}, protocol: 'http', forwarded: 'https', status: 400 },
+    { name: 'trusted HTTPS proxy', env: { TRUST_PROXY: 'true' }, protocol: 'http', forwarded: 'https', status: 200 },
+    { name: 'trusted proxy serving HTTP', env: { TRUST_PROXY: 'true' }, protocol: 'http', forwarded: 'http', status: 400 },
+    { name: 'direct HTTPS', env: {}, protocol: 'https', forwarded: '', status: 200 },
+  ])('links BookOrbit securely with $name', async ({ env, protocol, forwarded, status }) => {
+    const fake = fakeTransport();
+    fake.on('/auth/login', 200, { accessToken: 'orbit-token' });
+    fake.on('/auth/me', 200, { username: 'reader' });
+    const { app, db } = makeTestApp(fromEnv(env), { connectorTransport: fake.transport });
+    const { username, headers } = await registerUser(app);
+    const res = await app.request(`${protocol}://sync.example.com/api/v1/connectors/bookorbit`, {
+      method: 'PUT',
+      headers: { ...headers, 'x-forwarded-proto': forwarded },
+      body: JSON.stringify({ credential: { server: 'https://orbit.test', username, password: 'pw' } }),
+    });
+
+    expect(res.status).toBe(status);
+    if (status === 200) {
+      expect(await res.json()).toMatchObject({ id: 'bookorbit', linked: true });
+      expect(fake.calls.some((call) => call.url.endsWith('/auth/login'))).toBe(true);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM connector_accounts').get()).toMatchObject({ n: 1 });
+    } else {
+      const body = await res.json();
+      expect(body.message).toContain('HTTPS to CrossPoint Sync');
+      expect(body.message).toContain('TRUST_PROXY=true');
+      expect(fake.calls).toHaveLength(0);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM connector_accounts').get()).toMatchObject({ n: 0 });
+    }
   });
 
   it('rejects a forged loopback Host from a remote peer', async () => {
@@ -483,5 +533,23 @@ describe('hardcover highlight quotes', () => {
     expect(
       (db.prepare(`SELECT COUNT(*) AS n FROM connector_queue WHERE connector_id = 'hardcover' AND kind LIKE 'highlight%' AND status = 'pending'`).get() as { n: number }).n
     ).toBe(0);
+  });
+});
+
+describe('progress refresh deadline', () => {
+  it('serves stored progress when a best-effort puller hangs past the deadline', async () => {
+    const hang: HttpTransport = () => new Promise(() => {});
+    const { app, db } = makeTestApp({}, { connectorTransport: hang });
+    const { headers, username } = await registerUser(app);
+    const userId = (db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number }).id;
+    upsertAccount(db, userId, 'audiobookshelf', { server: 'https://abs.example', token: 't' }, null);
+    saveMatch(db, userId, 'audiobookshelf', DOC, { externalId: 'li_1', confidence: 1 }, 'manual');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const pending = app.request('/syncs/progress/' + DOC, { headers });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect((await pending).status).not.toBe(504);
+    } finally { vi.useRealTimers(); log.mockRestore(); db.close(); }
   });
 });

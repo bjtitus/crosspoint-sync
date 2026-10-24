@@ -169,24 +169,22 @@ describe('readwise-reader connector', () => {
     // Token A trips a 429 -> its cooldown is set.
     const a1 = fakeTransport();
     a1.on('id=', 429, {});
-    const blocked = await readwiseReaderConnector.pullProgress!(
+    await expect(readwiseReaderConnector.pullProgress!(
       { token: 'rw_A' },
       { externalId: 'x', confidence: 1 },
       a1.transport,
       0
-    );
-    expect(blocked).toBeNull();
+    )).rejects.toThrow('429');
 
     // A is now in cooldown: a follow-up makes no HTTP call at all.
     const a2 = fakeTransport();
     a2.on('id=', 200, { results: [{ reading_progress: 0.9, updated_at: '2026-01-01T00:00:00Z' }] });
-    const stillBlocked = await readwiseReaderConnector.pullProgress!(
+    await expect(readwiseReaderConnector.pullProgress!(
       { token: 'rw_A' },
       { externalId: 'x', confidence: 1 },
       a2.transport,
       0
-    );
-    expect(stillBlocked).toBeNull();
+    )).rejects.toThrow('rate limited');
     expect(a2.calls).toHaveLength(0);
 
     // A different token B is unaffected and goes through.

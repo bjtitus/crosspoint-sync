@@ -52,8 +52,9 @@ export async function pollConnector(
   function apply(ch: InboundChange, document: string): number {
     const exact = ch.progress !== undefined;
     const current = latestProgress(db, userId, document);
-    const updatedAt = exact ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
-    if (exact && current && updatedAt <= current.updated_at) return 0;
+    const dated = exact || connectorId === 'bookorbit';
+    const updatedAt = dated ? Math.floor(ch.updatedAtMs / 1000) : nowSeconds();
+    if (dated && current && updatedAt <= current.updated_at) return 0;
     const pct = exact ? ch.percentage : ch.finished || ch.percentage >= 0.999 ? 1 : ch.percentage;
     // Furthest-read-only sources (Kindle FRL): apply only when ADVANCING the
     // canonical position. A lower-or-equal value is always stale — FRL can't be
@@ -103,6 +104,12 @@ export async function pollConnector(
             externalId: match.external_id, externalEdition: match.external_edition, confidence: match.confidence,
           }, http, (t) => known.has(squash(t)));
           options.signal?.throwIfAborted();
+          // The slower EPUB/highlight request can outlive an unlink or rematch.
+          const accountAfter = getAccount(db, userId, connectorId);
+          const matchAfter = getMatch(db, userId, connectorId, match.document);
+          if (!accountAfter?.enabled || accountAfter.status !== 'ok' || accountAfter.cred_enc !== account.cred_enc) break;
+          if (matchAfter?.external_id !== match.external_id || matchAfter.external_edition !== match.external_edition ||
+              matchAfter.source !== match.source) continue;
           importHighlights(db, userId, match.document, highlights, connectorId);
         }
       } catch (err) {

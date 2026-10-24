@@ -52,7 +52,11 @@ export function migrate(db: DB, migrationsDir: string = DEFAULT_MIGRATIONS_DIR):
     if (applied.has(file)) continue;
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
     withTransaction(db, () => {
-      db.exec(sql);
+      // Early installs applied 0029 before attempted_at was added to it.
+      // Newer installs already have the column, so the repair must accept both.
+      const hasBookorbitAttempt = file === '0032_bookorbit_stats_attempted_at.sql' &&
+        db.prepare('PRAGMA table_info(bookorbit_stats_sync)').all().some((column) => column.name === 'attempted_at');
+      if (!hasBookorbitAttempt) db.exec(sql);
       db.prepare('INSERT INTO migrations (name, applied_at) VALUES (?, ?)').run(
         file,
         Math.floor(Date.now() / 1000)

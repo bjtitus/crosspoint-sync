@@ -27,6 +27,96 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('timeline start dates', () => {
+  const unix = (s) => day(s) / 1000 + 12 * 3600
+  const book = { document: 'a', title: 'Old book', percentage: 0.15 }
+  const baseline = { document: 'a', from: 0.15, to: 0.15, pages: 0, syncs: 1 }
+  const start = (date) => ({ day: date, pages: 0, syncs: 0, books: [{ ...baseline, from: 0, to: 0, syncs: 0, started: true }] })
+  const data = (date, days = []) => ({
+    books: [{ document: 'a', started_at: unix(date), finished_at: null }],
+    days: [start(date), { day: '2026-09-29', pages: 0, syncs: 1, books: [baseline] }, ...days],
+  })
+
+  it('shows a chosen start instead of the initial idle upload and moves it after date edits', () => {
+    const props = { session: {}, tab: 'timeline', books: [book] }
+    const { getByText, queryByText, rerender } = render(<Stats {...props} activity={data('2026-08-11')} />)
+    expect(getByText('Started reading')).toBeTruthy()
+    expect(getByText('Tue, Aug 11')).toBeTruthy()
+    expect(queryByText('Tue, Sep 29')).toBeNull()
+    expect(queryByText('Opened at 15%')).toBeNull()
+    rerender(<Stats {...props} activity={data('2026-08-12')} />)
+    expect(queryByText('Tue, Aug 11')).toBeNull()
+    expect(getByText('Wed, Aug 12')).toBeTruthy()
+  })
+
+  it('keeps later opens and forward progress on their recorded days', () => {
+    const a = data('2026-08-11', [{ day: '2026-09-30', books: [baseline] }])
+    a.days[1].books = [{ ...baseline, to: 0.2, pages: 5 }]
+    const { getByText } = render(<Stats session={{}} tab="timeline" books={[book]} activity={a} />)
+    expect(getByText('Started reading')).toBeTruthy()
+    expect(getByText('Read 5 pages · 15% to 20%')).toBeTruthy()
+    expect(getByText('Opened at 15%')).toBeTruthy()
+  })
+
+  it('keeps the first sync fallback when there is no chosen start date', () => {
+    const a = data('2026-09-29')
+    a.days.shift()
+    const { getByText, queryByText } = render(<Stats session={{}} tab="timeline" books={[book]} activity={a} />)
+    expect(getByText('Opened at 15%')).toBeTruthy()
+    expect(queryByText('Started reading')).toBeNull()
+  })
+
+  it('shows one start event when the chosen start is on the upload day at 15%', () => {
+    const a = data('2026-09-29')
+    a.days = [{ day: '2026-09-29', books: [{ ...baseline, started: true }] }]
+    const { getAllByText, queryByText } = render(<Stats session={{}} tab="timeline" books={[book]} activity={a} />)
+    expect(getAllByText('Started reading')).toHaveLength(1)
+    expect(queryByText('Opened at 15%')).toBeNull()
+  })
+
+  it('preserves a finish event on the first upload day', () => {
+    const a = data('2026-08-11')
+    a.books[0].finished_at = unix('2026-09-29')
+    const { getByText } = render(<Stats session={{}} tab="timeline" books={[book]} activity={a} />)
+    expect(getByText('Started reading')).toBeTruthy()
+    expect(getByText('Finished')).toBeTruthy()
+  })
+})
+
+describe('timeline refresh failures', () => {
+  it('labels saved activity as stale and offers a working retry', () => {
+    const retry = vi.fn()
+    const { getByRole, getByText } = render(<Stats session={{}} tab="timeline" books={[]} activity={activity}
+      activityError={new Error('server failed')} activityLoading={false} onRetryActivity={retry} />)
+    expect(getByRole('status').textContent).toContain('Showing saved activity.')
+    expect(getByRole('status').textContent).not.toContain('Showing data from')
+    expect(getByText('Your timeline starts soon')).toBeTruthy()
+    fireEvent.click(getByRole('button', { name: 'Retry' }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it('shows the last successful refresh time for saved activity', () => {
+    const updatedAt = Date.parse('2026-09-29T15:30:00Z')
+    const { getByRole, container } = render(<Stats session={{}} tab="timeline" books={[]} activity={activity}
+      activityError={new Error('offline')} activityUpdatedAt={updatedAt} onRetryActivity={vi.fn()} />)
+    expect(getByRole('status').textContent).toContain('Showing data from')
+    expect(container.querySelector('time').dateTime).toBe('2026-09-29T15:30:00.000Z')
+    expect(container.querySelector('time').textContent).toBe(new Date(updatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }))
+  })
+
+  it('shows initial-load failure without a stuck loading message and clears it on recovery', () => {
+    const props = { session: {}, tab: 'timeline', books: [], onRetryActivity: vi.fn() }
+    const { getByRole, queryByRole, queryByText, rerender } = render(<Stats {...props}
+      activityError={new Error('offline')} activityLoading />)
+    expect(getByRole('alert').textContent).toContain('Reading activity is unavailable.')
+    expect(getByRole('button', { name: 'Retrying…' }).disabled).toBe(true)
+    expect(queryByText('Loading…')).toBeNull()
+    rerender(<Stats {...props} activity={activity} activityError={null} activityLoading={false} />)
+    expect(queryByRole('alert')).toBeNull()
+    expect(queryByRole('status')).toBeNull()
+  })
+})
+
 describe('daily reading time', () => {
   const summary = {
     devices: [{ device: 'CrossInk' }], history_b64: '', anchor_day: anchorDay('2026-09-30'),
@@ -291,5 +381,15 @@ describe('reading grids', () => {
     expect(cls('Wed, Sep 30')).toContain('bg-brand-200')
     expect(cls('Tue, Sep 29')).toContain('bg-brand-300')
     expect(cls('Mon, Sep 28')).toContain('bg-brand-500')
+  })
+})
+
+describe('BookOrbit stats', () => {
+  it('explains exact duplicate exclusions without implying that device history is dropped', () => {
+    const props = { session: {}, books: [], activity, summary: { devices: [], bookorbit: { excluded_sessions: 2 } } }
+    const { getByText, queryByText, rerender } = render(<Stats {...props} />)
+    expect(getByText(/Duplicate BookOrbit session records are counted once/)).toBeTruthy()
+    rerender(<Stats {...props} summary={{ devices: [], bookorbit: { excluded_sessions: 0 } }} />)
+    expect(queryByText(/Duplicate BookOrbit session records are counted once/)).toBeNull()
   })
 })

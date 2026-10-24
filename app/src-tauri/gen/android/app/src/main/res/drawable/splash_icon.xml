@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ splash: the icon's mark alone (icons/splash-mark.svg), as large as the
+     system's 192dp circle in a 288dp icon allows. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp" android:height="288dp"
+    android:viewportWidth="1024" android:viewportHeight="1024">
+    <group android:scaleX="1.4" android:scaleY="1.4" android:translateX="153.6" android:translateY="155">
+        <path android:fillColor="#FFFFFF" android:pathData="M123 104L242 175L242 319L123 248ZM281 342.5L388 278L388 408Z"/>
+        <path android:fillColor="#000000" android:fillType="evenOdd"
+            android:pathData="M98 104.97A26 26 0 0 1 137.4 82.69L256 154L374.6 82.69A26 26 0 0 1 414 104.97L414 405.03A26 26 0 0 1 374.6 427.31L256 356L137.4 427.31A26 26 0 0 1 98 405.03ZM123 104L242 175L242 319L123 248ZM281 342.5L388 278L388 408Z"/>
+    </group>
+</vector>

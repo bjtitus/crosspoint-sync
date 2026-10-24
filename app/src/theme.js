@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { isApp } from './api.js'
 
 // Appearance: 'system' | 'light' | 'dark', remembered on this device. index.html
 // applies the same choice before first paint; keep the two in step.
@@ -24,6 +26,8 @@ export function applyTheme(pref) {
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? PAGE.dark : PAGE.light)
   // Android: status/nav bars, WebView background and the next launch's splash.
   window.CrossPointTheme?.apply(pref, dark)
+  // iOS: status bar text, native tab bar and keyboard (no-op elsewhere).
+  if (isApp) invoke('set_appearance', { pref, dark }).catch(() => {})
 }
 
 export function useTheme() {

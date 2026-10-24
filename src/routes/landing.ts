@@ -5,6 +5,14 @@
  * are the real app, captured with a seeded demo account.
  */
 const GITHUB = 'https://github.com/crosspoint-reader/crosspoint-sync';
+const IOS = 'https://testflight.apple.com/join/XP7hh3y4';
+const ANDROID = 'https://play.google.com/store/apps/details?id=com.crosspointreader.sync';
+
+// Store badges in the stores' black-pill style, logos from simple-icons.
+const STORES = `<div class="stores">
+<a class="store" href="${IOS}" aria-label="Download on the App Store"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg><span><small>Download on the</small>App Store</span></a>
+<a class="store" href="${ANDROID}" aria-label="Get it on Google Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z"/></svg><span><small>GET IT ON</small>Google Play</span></a>
+</div>`;
 
 export const SITE_DESCRIPTION =
   "Sync your e-reader's progress, highlights and reading stats to your phone, the web, Hardcover, Readwise and more. Works with CrossPoint, CrossInk and KOReader.";
@@ -93,6 +101,15 @@ nav a.link:hover{color:var(--ink);background:var(--wash)}
 .btn.ghost{color:var(--ink);box-shadow:inset 0 0 0 1px var(--line);background:var(--surface)}
 .btn.ghost:hover{background:var(--wash)}
 nav .btn{height:38px;padding:0 16px;font-size:14px}
+.stores{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.hero .stores{margin-top:32px}
+.closing .stores{justify-content:center}
+.store{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 14px 0 12px;border-radius:9px;background:#000;color:#fff;
+  box-shadow:inset 0 0 0 1px #a6a6a6;transition:transform .15s}
+.store:active{transform:scale(.98)}
+.store svg{width:24px;height:24px;fill:currentColor;flex:none}
+.store span{display:flex;flex-direction:column;font-size:18px;font-weight:600;line-height:1.05;letter-spacing:-.01em}
+.store small{font-size:10px;font-weight:500;letter-spacing:.01em}
 
 /* device frames */
 .phone,.tablet{container-type:inline-size}
@@ -204,7 +221,7 @@ ${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
 <body>
 <header><div class="wrap">
   <a class="mark" href="/"><img src="/logo.png" alt="">CrossPoint Sync</a>
-  <nav><a class="link" href="${GITHUB}">Self-host</a><a class="btn primary" href="/app/">Get started</a></nav>
+  <nav><a class="link" href="${GITHUB}">Self-Host Sync</a><a class="btn primary" href="/app/">Sync Dashboard</a></nav>
 </div></header>
 
 <main>
@@ -213,7 +230,7 @@ ${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
     <span class="hand eyebrow">read on every device</span>
     <h1>Your reading, in sync <span class="u">everywhere</span></h1>
     <p class="sub">Your e-reader's progress, clippings and stats on your phone and the web, and in the services you already use.</p>
-    <div class="cta"><a class="btn primary" href="/app/">Get started</a><a class="btn ghost" href="#how">How it works</a></div>
+    ${STORES}
   </div>
   <div class="stage">
     ${browser('desktop-library', 'The CrossPoint Sync library on the web', '', true)}
@@ -290,7 +307,8 @@ ${metaTags('CrossPoint Sync: Your reading, in sync everywhere')}
 <div class="wrap closing">
   <h2>Start syncing in a minute</h2>
   <p>Free to use and open source. Run it here, or on your own server with one Docker image.</p>
-  <div class="cta"><a class="btn primary" href="/app/">Get started</a><a class="btn ghost" href="${GITHUB}">Self-host</a></div>
+  <div class="cta"><a class="btn primary" href="/app/">Sync Dashboard</a><a class="btn ghost" href="${GITHUB}">Self-Host Sync</a></div>
+  ${STORES}
 </div>
 </main>
 

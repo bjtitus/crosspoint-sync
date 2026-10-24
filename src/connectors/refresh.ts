@@ -4,13 +4,14 @@ import { fetchTransport } from './registry.js';
 import { resolveMatch } from './runner.js';
 import { getAccount, getMatch } from './store.js';
 import type { HttpTransport } from './types.js';
+import { importBookorbitStats } from './bookorbit-stats.js';
 
 export type ProgressRefresh = (userId: number, document: string) => Promise<void>;
 
 /**
- * Per-book fan-in pullers consulted when a device asks for progress. This is the
- * ONLY time these services hear from us (plus Spotify's hourly pollSpotify; there
- * is no other background polling), so request rates stay at human reading cadence.
+ * Per-book fan-in pullers consulted when a device asks for progress. This
+ * runs alongside Spotify's hourly poll. BookOrbit also supports manual per-book
+ * sync; it does not poll in the background.
  *
  * strict:        a puller whose failure fails the progress GET (BookFusion: its
  *                sidecar matches are treated as authoritative for the position).
@@ -88,7 +89,14 @@ export function createProgressRefresh(db: DB, http: HttpTransport = fetchTranspo
         )
       ),
       deadline,
-    ]).then(() => {}).finally(() => {
+    ]).then(() => {
+      if (pullers.some((p) => p.id === 'bookorbit')) {
+        void importBookorbitStats(db, userId, http, { document }).catch(() => {});
+      }
+    }, (error) => {
+      // Best-effort pullers must never fail the GET, not even by running out the clock.
+      if (pullers.some((p) => p.strict)) throw error;
+    }).finally(() => {
       clearTimeout(timer);
       pending.delete(key);
     });

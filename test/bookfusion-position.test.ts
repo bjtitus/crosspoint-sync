@@ -1,7 +1,7 @@
 import { crc32, gunzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubRangeCfi, epubRangeOffsets, epubXPath, loadEpubMap, redactEpub,
+  bookFusionEpub, clearBookFusionEpubCache, epubPosition, epubQuoteRangeCfi, epubRangeCfi, epubRangeOffsets, epubXPath, loadEpubMap, redactEpub,
 } from '../src/connectors/bookfusion-epub.js';
 import { bookfusionConnector } from '../src/connectors/bookfusion.js';
 import { bookorbitConnector } from '../src/connectors/bookorbit.js';
@@ -580,6 +580,50 @@ describe('epubRangeCfi (CrossPoint clipping offsets)', () => {
 });
 
 describe('bookorbit highlights', () => {
+  it('locates a unique full quote for a saved clipping without offsets', async () => {
+    const o = orbit();
+    const event = ev('bold tail', 'old note');
+    delete (event.highlight as Partial<typeof event.highlight>).startOffset;
+    delete (event.highlight as Partial<typeof event.highlight>).endOffset;
+    expect(await bookorbitConnector.push(CRED, MATCH, event, o.http)).toEqual({ ok: true });
+    const post = o.calls.find((c) => c.method === 'POST' && c.url.endsWith('/books/12/annotations'))!;
+    expect(JSON.parse(post.body!)).toMatchObject({ cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail', note: 'old note' });
+  });
+
+  it('matches visible Unicode text across inline nodes and ignores whitespace and soft hyphens', async () => {
+    const bytes = epub('<script>wrong</script><p>😀<b>bold</b>\u00ad  tail</p>');
+    const range = await epubQuoteRangeCfi(bytes, '😀bold tail');
+    const at = await epubRangeOffsets(bytes, range.cfi);
+    expect(at).toMatchObject({ spine: 1, start: 0, end: 12 });
+    expect(range.text.replace(/[\s\u00ad]+/g, '')).toBe('😀boldtail');
+  });
+
+  it('refuses ambiguous quotes within or across chapters instead of choosing a highlight location', async () => {
+    await expect(epubQuoteRangeCfi(epub('<p>same quote</p><p>same quote</p>'), 'same quote'))
+      .rejects.toThrow('appears more than once');
+    await expect(epubQuoteRangeCfi(epub('<p>First</p>'), 'First')).rejects.toThrow('appears more than once');
+    await expect(epubQuoteRangeCfi(epub(), 'absent quote')).rejects.toThrow('clipping text not found');
+  });
+
+  it('resolves equivalent straight and curly quotation marks without changing the source offsets', async () => {
+    const bytes = epub('<p>“It’s fine,” she said.</p>');
+    const range = await epubQuoteRangeCfi(bytes, '"It\'s fine," she said.');
+    expect(range.text).toBe('“It’s fine,” she said.');
+    expect((await epubRangeOffsets(bytes, range.cfi)).start).toBe(0);
+    await expect(epubQuoteRangeCfi(epub('<p>“fine”</p><p>"fine"</p>'), '"fine"')).rejects.toThrow('appears more than once');
+  });
+
+  it('locates an entire long legacy quote across edition punctuation and case differences', async () => {
+    const old = '"I can\'t remember things as I used—and I do not keep the same size for ten minutes together!"';
+    const publisher = '“I ca’n’t remember things as I used; and I do not keep the same size for ten minutes TOGETHER!”';
+    const range = await epubQuoteRangeCfi(epub(`<p>${publisher}</p>`), old);
+    expect(range.text).toContain('ca’n’t remember things');
+    expect(range.text).toContain('minutes TOGETHER');
+    await expect(epubQuoteRangeCfi(epub(`<p>${publisher}</p><p>${publisher}</p>`), old))
+      .rejects.toThrow('appears more than once');
+    await expect(epubQuoteRangeCfi(epub('<p>Hello, WORLD!</p>'), 'Hello world')).rejects.toThrow('clipping text not found');
+  });
+
   const CRED = { server: 'orbit.test', username: 'hl', password: 'pw' };
   const MATCH = { externalId: '12', externalEdition: '71', confidence: 1 };
   const LOGIN = { accessToken: 'at', accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString() };
@@ -594,6 +638,7 @@ describe('bookorbit highlights', () => {
         body: new ReadableStream({ start(controller) { controller.enqueue(epub()); controller.close(); } }),
       };
       if (url.endsWith('/books/12/annotations') && init.method === 'GET') return json(existing);
+      if (url.endsWith('/books/files/71/progress') && init.method === 'GET') return json({ percentage: 0, updatedAt: null });
       return json({});
     };
     return { http, calls };
@@ -626,6 +671,12 @@ describe('bookorbit highlights', () => {
     expect(o.calls.some((c) => c.url.includes('/annotations'))).toBe(false);
   });
 
+  it('does not duplicate an imported highlight with an equivalent CFI', async () => {
+    const o = orbit([{ id: 5, jumpFileId: 71, cfi: 'epubcfi(/8/4[b]!/6,/4/2/1:0,/4/3:5)', text: 'bold tail', note: null }]);
+    expect(await bookorbitConnector.push(CRED, MATCH, ev('bold tail'), o.http)).toEqual({ ok: true });
+    expect(o.calls.some((c) => c.method === 'POST' && c.url.includes('/annotations'))).toBe(false);
+  });
+
   it('maps a range CFI back to the clipping\'s chapter offsets', async () => {
     const want = { spine: 1, start: 9, end: 18, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail' };
     expect(await epubRangeOffsets(epub(), 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)')).toEqual(want);
@@ -640,7 +691,7 @@ describe('bookorbit highlights', () => {
     const o = orbit();
     const r = await bookorbitConnector.push(CRED, MATCH, { kind: 'progress', document: 'd', percentage: 0.423712, progress: XPATH, timestamp: 1 }, o.http);
     expect(r.ok).toBe(true);
-    const save = o.calls.find((c) => c.url.endsWith('/books/files/71/progress'))!;
+    const save = o.calls.find((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'))!;
     expect(JSON.parse(save.body!)).toEqual({ percentage: 42.3712, koreaderProgress: XPATH, cfi: (await epubPosition(epub(), XPATH)).cfi });
   });
 
@@ -655,15 +706,15 @@ describe('bookorbit highlights', () => {
     clearBookFusionEpubCache();
     await bookorbitConnector.push(CRED, MATCH, ev, o.http, ctx);
     expect(o.calls.filter((c) => c.url.endsWith('/serve'))).toHaveLength(1);
-    const saves = o.calls.filter((c) => c.url.endsWith('/books/files/71/progress'));
+    const saves = o.calls.filter((c) => c.method === 'POST' && c.url.endsWith('/books/files/71/progress'));
     expect(JSON.parse(saves[1].body!).cfi).toBe((await epubPosition(epub(), XPATH)).cfi);
   });
 
   it('pulls an exact position from the web reader\'s CFI or a KOReader XPath', async () => {
-    const row = (extra: object) => [{ fileId: 71, percentage: 60, updatedAt: '2026-09-02T00:00:00Z', ...extra }];
+    const row = (extra: object) => ({ percentage: 60, updatedAt: '2026-09-02T00:00:00Z', ...extra });
     const pull = (rows: unknown) => {
       const o = orbit();
-      const http: HttpTransport = async (url, init) => url.endsWith('/books/12/progress')
+      const http: HttpTransport = async (url, init) => url.endsWith('/books/files/71/progress')
         ? { status: 200, text: async () => '', json: async () => rows } : o.http(url, init);
       return bookorbitConnector.pullProgress!(CRED, MATCH, http, 0);
     };
@@ -679,8 +730,8 @@ describe('bookorbit highlights', () => {
   it('is pulled when a reader asks for progress', async () => {
     const o = orbit([{ id: 5, cfi: 'epubcfi(/8/4!/6/4,/2/1:0,/3:5)', text: 'bold tail' }]);
     const cfi = (await epubPosition(epub(), XPATH)).cfi;
-    const http: HttpTransport = async (url, init) => url.endsWith('/books/12/progress')
-      ? { status: 200, text: async () => '', json: async () => [{ fileId: 71, percentage: 60, cfi, updatedAt: new Date().toISOString() }] }
+    const http: HttpTransport = async (url, init) => url.endsWith('/books/files/71/progress')
+      ? { status: 200, text: async () => '', json: async () => ({ percentage: 60, cfi, updatedAt: new Date().toISOString() }) }
       : o.http(url, init);
     const { app, db } = makeTestApp({}, { connectorTransport: http });
     const { headers } = await registerUser(app);

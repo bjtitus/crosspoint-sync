@@ -19,6 +19,24 @@ beforeEach(() => {
   fetchMock.mockReset()
 })
 
+it('rejects a failed activity refresh while retaining its saved copy for display', async () => {
+  const s = session('reader')
+  const saved = { books: [], days: [], reading_days: [] }
+  expect(cached.activityUpdatedAt(s)).toBeNull()
+  const before = Date.now()
+  fetchMock.mockResolvedValueOnce(response(saved))
+  await api.activity(s)
+  expect(cached.activity(s)).toEqual(saved)
+  const savedAt = cached.activityUpdatedAt(s)
+  expect(savedAt).toBeGreaterThanOrEqual(before)
+  expect(savedAt).toBeLessThanOrEqual(Date.now())
+  expect(cached.activityUpdatedAt(session('other-reader'))).toBeNull()
+  fetchMock.mockRejectedValue(new Error('offline'))
+  await expect(api.activity(s)).rejects.toThrow('offline')
+  expect(cached.activity(s)).toEqual(saved)
+  expect(cached.activityUpdatedAt(s)).toBe(savedAt)
+})
+
 describe('account data isolation', () => {
   it('ignores legacy copies that may contain a different account after upgrading', () => {
     localStorage.setItem(`crosspoint-offline:uxj3@https://sync.test${progress}`, JSON.stringify({ items: [{ title: 'uxj4 book' }] }))

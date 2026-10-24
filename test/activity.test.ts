@@ -10,6 +10,38 @@ const doc = (page_count: number | null, status: string | null = null, status_at:
 });
 
 describe('computeActivity', () => {
+  it('adds a start event from CrossInk and moves it when manual dates change or clear', () => {
+    const rows = [{ document: 'a', percentage: 0.15, at: T }];
+    const docs = new Map([['a', doc(100)]]);
+    const starts = new Map([['a', T - 10 * DAY]]);
+    const startDays = () => computeActivity(rows, docs, 240, new Map(), starts).days
+      .filter((d) => d.books.some((b) => b.started)).map((d) => d.day);
+    expect(startDays()).toEqual(['2026-08-22']);
+    docs.set('a', { ...doc(100), start_date: T - 5 * DAY });
+    expect(startDays()).toEqual(['2026-08-27']);
+    docs.set('a', { ...doc(100), start_date: T - 3 * DAY });
+    expect(startDays()).toEqual(['2026-08-29']);
+    docs.set('a', doc(100));
+    expect(startDays()).toEqual(['2026-08-22']);
+    starts.clear();
+    expect(startDays()).toEqual([]);
+    docs.set('a', { ...doc(100), start_date: T - 5 * DAY });
+    const a = computeActivity(rows, docs, 240);
+    expect(a.days[0]).toEqual({ day: '2026-08-27', pages: 0, syncs: 0,
+      books: [{ document: 'a', pages: 0, syncs: 0, from: 0, to: 0, started: true }] });
+    expect(a.pages_total).toBe(15);
+    expect(a.days[1].syncs).toBe(1);
+  });
+
+  it('merges a chosen start with real progress on the same day without losing pages', () => {
+    const a = computeActivity([
+      { document: 'a', percentage: 0.15, at: T },
+      { document: 'a', percentage: 0.25, at: T + 3600 },
+    ], new Map([['a', { ...doc(100), start_date: T }]]));
+    expect(a.days).toHaveLength(1);
+    expect(a.days[0].books[0]).toEqual({ document: 'a', pages: 10, syncs: 2, from: 0.15, to: 0.25, started: true });
+  });
+
   it('marks chosen start and finish days without filling the days between or adding pages', () => {
     const info = { ...doc(100), start_date: T - 10 * DAY, finished_date: T - 5 * DAY };
     const a = computeActivity(

@@ -54,8 +54,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.1.0
-        CFBundleVersion: 0.1.0
+        CFBundleShortVersionString: 0.1.1
+        CFBundleVersion: "5"
         # iOS 27 refuses to launch SDK-27 apps on the legacy app-delegate
         # lifecycle; tao (>= 0.37) switches to its scene delegate when this is set.
         UIApplicationSceneManifest:
@@ -73,6 +73,8 @@ targets:
       path: crosspoint-sync-app_iOS/crosspoint-sync-app_iOS.entitlements
       properties:
         com.apple.security.application-groups: [group.com.crosspointreader.sync]
+        # Universal links for connector sign-in callbacks (server serves the AASA file).
+        com.apple.developer.associated-domains: [applinks:sync.crosspointreader.com]
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -118,8 +120,8 @@ targets:
       path: CrossPointWidget/Info.plist
       properties:
         CFBundleDisplayName: CrossPoint Sync
-        CFBundleShortVersionString: 0.1.0
-        CFBundleVersion: 0.1.0
+        CFBundleShortVersionString: 0.1.1
+        CFBundleVersion: "5"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -129,6 +131,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.crosspointreader.sync.widget
+        DEVELOPMENT_TEAM: 96247QW4R8
+        CODE_SIGN_STYLE: Automatic
         PRODUCT_NAME: CrossPointWidget
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"

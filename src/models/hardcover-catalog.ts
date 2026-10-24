@@ -153,13 +153,17 @@ export async function searchHardcover(
   for (const hit of body?.data?.search?.results?.hits ?? []) {
     const book = toBook(hit?.document);
     if (!book) continue;
-    const score = scoreCandidate(title, author, { externalId: book.id, title: book.title, author: book.author ?? undefined });
+    // Translations ("L'uomo di Marte") only appear among the alternative titles.
+    const titles = [book.title, ...(hit.document.alternative_titles ?? []).filter((t: unknown) => typeof t === 'string')];
+    const score = Math.max(
+      ...titles.map((t: string) => scoreCandidate(title, author, { externalId: book.id, title: t, author: book.author ?? undefined }))
+    );
     if (score >= THRESHOLD && (!top || score > top.score)) top = { book, score };
   }
   return top?.book ?? null;
 }
 
-const cacheKey = (title: string, author: string) => `${normalizeText(coreTitle(title))}|${normalizeAuthor(author)}`;
+export const cacheKey = (title: string, author: string) => `${normalizeText(coreTitle(title))}|${normalizeAuthor(author)}`;
 
 /** Shared, cached lookup: one Hardcover request per distinct book across all users. */
 export async function hardcoverBook(

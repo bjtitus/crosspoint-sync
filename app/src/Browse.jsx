@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
-import { ArrowLeft, BookOpen, ChevronRight, Download, Loader2, Pencil, Plus, Search, Send as SendIcon, Server, Trash2 } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { impactFeedback, selectionFeedback } from '@tauri-apps/plugin-haptics'
+import { ArrowLeft, BookOpen, ChevronRight, Download, GripVertical, Loader2, Pencil, Plus, Search, Send as SendIcon, Server, Trash2 } from 'lucide-react'
 import { isApp } from './api.js'
 import { loadDevicePrefs } from './device.js'
-import { download, feed as fetchFeed, loadCatalogs, navRows, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
+import { download, feed as fetchFeed, loadCatalogs, moveCatalog, navRows, readable, saveCatalogs, search, sendDownload } from './catalogs.js'
 import { progressLabel } from './Send.jsx'
-import { Card, EmptyAction, EmptyState, Eyebrow, Spinner, folderLabel, notify } from './ui.jsx'
+import ConversionLog from './ConversionLog.jsx'
+import { transferProgress } from './epub/log.js'
+import { Card, EmptyAction, EmptyState, Eyebrow, Sheet, Spinner, folderLabel, notify } from './ui.jsx'
+import { useNativeBack } from './tabbar.js'
 
 // Hash routes:
 //   #/browse                         storefront: a block of rails per catalog
@@ -55,10 +59,11 @@ const openBook = (cat) => (entry) => {
   location.hash = href(cat, 'b', key)
 }
 
-function TopBar({ back, label }) {
+function BackBar({ back, label }) {
   // Same 44px row as the account avatar so they line up (see Book.jsx).
+  useNativeBack(back === 'history' ? () => history.back() : back)
   return (
-    <div className="flex h-11 items-center pr-12 md:pr-0">
+    <div className="mb-6 flex h-11 items-center pr-12 md:mb-0 md:pr-0">
       <a
         href={back}
         onClick={(e) => {
@@ -67,7 +72,7 @@ function TopBar({ back, label }) {
             history.back()
           }
         }}
-        className="-ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
+        className="native-hide -ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
       >
         <ArrowLeft className="size-6" strokeWidth={2} /> {label}
       </a>
@@ -99,9 +104,11 @@ function Tile({ entry, onOpen }) {
   )
 }
 
+const gridClass = 'grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:gap-x-5 lg:grid-cols-5 xl:grid-cols-6'
+
 function Grid({ entries, onOpen }) {
   return (
-    <div className="grid grid-cols-3 gap-x-3 gap-y-5 sm:grid-cols-4 md:gap-x-5 lg:grid-cols-5 xl:grid-cols-6">
+    <div className={gridClass}>
       {entries.map((e, i) => (
         <Tile key={`${e.id}-${i}`} entry={e} onOpen={onOpen} />
       ))}
@@ -209,8 +216,8 @@ function BookPage({ cat, entryKey }) {
 
   if (!entry) {
     return (
-      <div className="px-4 pt-4 md:px-8 md:pt-6 lg:px-12">
-        <TopBar back={href(cat)} label={cat.name} />
+      <div className="px-4 pt-6 md:px-8 md:pt-6 lg:px-12">
+        <BackBar back={href(cat)} label={cat.name} />
         <p className="py-16 text-center text-sm text-stone-500">Open this book again from the catalog.</p>
       </div>
     )
@@ -219,19 +226,19 @@ function BookPage({ cat, entryKey }) {
   const formats = readable(entry)
   const chosen = formats.find((f) => f.href === format?.href) ?? formats[0]
   async function run(alsoSend) {
-    setJob({ state: 'working', progress: null })
+    setJob({ state: 'working', progress: null, logs: [] })
     try {
       const book = await download(cat, entry, chosen, (progress) => setJob((j) => ({ ...j, progress })))
       const prefs = loadDevicePrefs()
-      const used = alsoSend ? await sendDownload(book.name, prefs, (progress) => setJob((j) => ({ ...j, progress }))) : null
-      setJob({ state: 'done', sent: alsoSend })
+      const used = alsoSend ? await sendDownload(book.name, prefs, (event) => setJob((j) => transferProgress(j, event))) : null
+      setJob((j) => ({ ...j, state: 'done', sent: alsoSend }))
       notify(
         alsoSend
           ? { title: 'Sent to your reader', detail: `${used} in ${folderLabel(prefs.folder)}` }
           : { title: 'Downloaded', detail: `${entry.title} is on your shelf in Send` }
       )
     } catch (e) {
-      setJob({ state: 'error', error: String(e) })
+      setJob((j) => ({ ...j, state: 'error', error: String(e) }))
       notify({ error: true, title: alsoSend ? "Couldn't send that book" : "Couldn't download that book", detail: String(e) })
     }
   }
@@ -242,8 +249,8 @@ function BookPage({ cat, entryKey }) {
   const facts = [entry.published?.slice(0, 4), entry.language?.toUpperCase(), cat.name].filter(Boolean)
 
   return (
-    <div className="px-4 pt-4 pb-8 md:px-8 md:pt-6 lg:px-12">
-      <TopBar back="history" label="Back" />
+    <div className="px-4 pt-6 pb-8 md:px-8 md:pt-6 lg:px-12">
+      <BackBar back="history" label="Back" />
       <div className="mt-3 md:grid md:grid-cols-[15rem_1fr] md:items-start md:gap-10 lg:grid-cols-[18rem_1fr] lg:gap-14">
         <aside className="md:sticky md:top-8">
           <Cover entry={entry} large className="mx-auto w-44 shadow-lg md:w-full" />
@@ -293,17 +300,22 @@ function BookPage({ cat, entryKey }) {
                   <Download className="size-5" /> Download
                 </button>
               </div>
-              {job && (
-                <p className={`mt-3 text-center text-sm ${job.state === 'error' ? 'text-red-600' : 'text-stone-600'}`}>
-                  {job.state === 'working'
-                    ? progressLabel(job.progress)
-                    : job.state === 'done'
-                      ? job.sent
-                        ? 'On your reader.'
-                        : 'Downloaded. Send it any time from the Send tab.'
-                      : job.error}
-                </p>
-              )}
+              <ConversionLog entries={job?.logs}>
+                {(details) => job && (
+                  <p className={`mt-3 flex items-center justify-center text-sm ${job.state === 'error' ? 'text-red-600' : 'text-stone-600'}`}>
+                    <span>
+                      {job.state === 'working'
+                        ? progressLabel(job.progress)
+                        : job.state === 'done'
+                          ? job.sent
+                            ? 'On your reader.'
+                            : 'Downloaded. Send it any time from the Send tab.'
+                          : job.error}
+                    </span>
+                    {details}
+                  </p>
+                )}
+              </ConversionLog>
             </div>
           )}
 
@@ -485,7 +497,7 @@ function Storefront({ catalogs }) {
   )
 }
 
-// Search every catalog at once: a rail of results per catalog.
+// Search every catalog at once, keeping the source attached to each result.
 function SearchAll({ catalogs, query }) {
   const [results, setResults] = useState({})
   useEffect(() => {
@@ -493,7 +505,7 @@ function SearchAll({ catalogs, query }) {
     setResults({})
     for (const c of catalogs) {
       search(c, query).then(
-        (f) => live && setResults((r) => ({ ...r, [c.id]: { entries: f.groups.length ? f.groups.flatMap((g) => g.entries) : f.entries } })),
+        (f) => live && setResults((r) => ({ ...r, [c.id]: { entries: f.groups.length ? f.groups.flatMap((g) => g.entries) : f.entries, next: f.next } })),
         (e) => live && setResults((r) => ({ ...r, [c.id]: { error: String(e) } }))
       )
     }
@@ -501,22 +513,39 @@ function SearchAll({ catalogs, query }) {
       live = false
     }
   }, [catalogs, query])
+  const entries = catalogs.flatMap((cat) => (results[cat.id]?.entries ?? []).map((entry) => ({ cat, entry })))
+  const loading = catalogs.some((cat) => !results[cat.id])
+  const errors = catalogs.filter((cat) => results[cat.id]?.error)
   return (
-    <div className="px-4 pt-4 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <TopBar back="#/browse" label="Browse" />
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <BackBar back="#/browse" label="Browse" />
       <SearchBox value={query} placeholder="Search all catalogs" onSubmit={searchAll} />
-      {catalogs.map((c) => {
-        const r = results[c.id]
-        if (!r) return <SkeletonRail key={c.id} title={c.name} />
-        if (r.error || !r.entries.length)
-          return (
-            <section key={c.id} className="mt-7">
-              <h3 className="font-display text-xl font-semibold text-stone-900">{c.name}</h3>
-              <p className="mt-1 text-sm text-stone-500">{r.error ?? 'No matches.'}</p>
-            </section>
-          )
-        return <CoverRail key={c.id} title={c.name} more={href(c, 's', query)} entries={r.entries} onOpen={openBook(c)} />
-      })}
+      {loading && <p role="status" className="mt-6 text-sm text-stone-500">Searching catalogs…</p>}
+      {errors.map((cat) => (
+        <p key={cat.id} role="alert" className="mt-3 text-sm text-red-600">{cat.name}: {results[cat.id].error}</p>
+      ))}
+      {entries.length > 0 && (
+        <ul aria-label="Search results" className={`mt-6 ${gridClass}`}>
+          {entries.map(({ cat, entry }, i) => (
+            <li key={`${cat.id}-${entry.id}-${i}`} className="min-w-0">
+              <Tile entry={entry} onOpen={openBook(cat)} />
+              <p className="mt-1 truncate text-xs text-stone-500">{cat.name}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!loading && !entries.length && !errors.length && (
+        <EmptyState compact icon={Search} title="No matches">
+          Try another title or author.
+        </EmptyState>
+      )}
+      <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2">
+        {catalogs.filter((cat) => results[cat.id]?.next).map((cat) => (
+          <a key={cat.id} href={href(cat, 's', query)} className="flex min-h-11 items-center text-sm font-semibold text-brand-600">
+            More results from {cat.name}
+          </a>
+        ))}
+      </div>
     </div>
   )
 }
@@ -552,12 +581,12 @@ function FeedView({ cat, url, query }) {
   const { feed, error } = state
   const rows = feed ? navRows(feed.navigation) : []
   // Grouped feeds (OPDS 2 lanes) also flatten their books into entries; show the lanes instead.
-  const loose = feed?.groups.length ? [] : (feed?.entries ?? [])
+  const loose = feed?.groups.length && !query ? [] : (feed?.entries ?? [])
   const open = openBook(cat)
 
   return (
-    <div className="px-4 pt-4 pb-6 md:px-8 md:pt-6 lg:px-12">
-      <TopBar back={url || query ? 'history' : '#/browse'} label={url || query ? 'Back' : 'Browse'} />
+    <div className="px-4 pt-6 pb-6 md:px-8 md:pt-6 lg:px-12">
+      <BackBar back={url || query ? 'history' : '#/browse'} label={url || query ? 'Back' : 'Browse'} />
       <h1 className="mt-2 font-display text-3xl/tight font-semibold tracking-tight text-stone-900">
         {query ? `“${query}”` : (feed?.title ?? cat.name)}
       </h1>
@@ -597,7 +626,7 @@ function FeedView({ cat, url, query }) {
             </Card>
           )}
 
-          {feed.groups.map((g, gi) => (
+          {!query && feed.groups.map((g, gi) => (
             <CoverRail key={`${g.title}-${gi}`} title={g.title} more={g.href && href(cat, 'f', g.href)} entries={g.entries} onOpen={open} />
           ))}
 
@@ -688,15 +717,94 @@ function CatalogForm({ initial, onSave, onCancel }) {
   )
 }
 
+// Haptics need the app (iOS/Android); elsewhere the call just fails quietly.
+const haptic = (fn) => isApp && fn().catch(() => {})
+
 function Manage({ catalogs, setCatalogs }) {
   const [editing, setEditing] = useState(catalogs.length ? null : 'new') // catalog | 'new' | null
+  const [removing, setRemoving] = useState(null)
   const save = (cat) => {
     setCatalogs(catalogs.some((c) => c.id === cat.id) ? catalogs.map((c) => (c.id === cat.id ? cat : c)) : [...catalogs, cat])
     setEditing(null)
   }
+  // Drag a card by its grip to reorder (Browse lists catalogs in this order). Pointer
+  // events, not HTML drag and drop, which touch WebKit doesn't do reliably. The card
+  // follows the finger; the others slide into their new slots (FLIP).
+  const [dragging, setDragging] = useState(null) // catalog id
+  const cards = useRef(new Map()) // id -> element
+  const grab = useRef(null) // { id, dx, dy (finger within card), tx, ty (card's offset), x, y (finger) }
+  const before = useRef(null) // id -> rect, just before a swap
+
+  // Keep the dragged card under the finger, wherever its slot is now.
+  const follow = () => {
+    const g = grab.current
+    const el = g && cards.current.get(g.id)
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    g.tx = g.x - g.dx - (r.left - g.tx)
+    g.ty = g.y - g.dy - (r.top - g.ty)
+    el.style.transform = `translate(${g.tx}px, ${g.ty}px)`
+  }
+
+  const dragStart = (e, id) => {
+    const r = cards.current.get(id).getBoundingClientRect()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    grab.current = { id, dx: e.clientX - r.left, dy: e.clientY - r.top, tx: 0, ty: 0, x: e.clientX, y: e.clientY }
+    setDragging(id)
+    haptic(() => impactFeedback('medium'))
+  }
+
+  const dragMove = (e) => {
+    const g = grab.current
+    if (!g) return
+    g.x = e.clientX
+    g.y = e.clientY
+    follow()
+    const others = [...cards.current].filter(([id]) => id !== g.id)
+    // Hit-test layout slots (offset*), not on-screen rects: a card still sliding away
+    // from a swap would otherwise be under the finger again and swap straight back.
+    const over = others.find(([, el]) => {
+      const p = el.offsetParent.getBoundingClientRect()
+      const x = g.x - p.left
+      const y = g.y - p.top
+      return x >= el.offsetLeft && x <= el.offsetLeft + el.offsetWidth && y >= el.offsetTop && y <= el.offsetTop + el.offsetHeight
+    })?.[0]
+    if (!over) return
+    before.current = new Map(others.map(([id, el]) => [id, el.getBoundingClientRect()]))
+    setCatalogs(moveCatalog(catalogs, g.id, over))
+    haptic(selectionFeedback)
+  }
+
+  const dragEnd = () => {
+    const el = grab.current && cards.current.get(grab.current.id)
+    grab.current = null
+    setDragging(null)
+    if (!el) return
+    el.animate([{ transform: el.style.transform }, { transform: 'none' }], { duration: 180, easing: 'ease-out' })
+    el.style.transform = ''
+    haptic(() => impactFeedback('light'))
+  }
+
+  // After a swap: slide each moved card from where it was, and re-pin the dragged one.
+  useLayoutEffect(() => {
+    const was = before.current
+    before.current = null
+    if (!was) return
+    follow()
+    for (const [id, old] of was) {
+      const el = cards.current.get(id)
+      el?.getAnimations().forEach((a) => a.cancel()) // measure the slot, not a slide in progress
+      const now = el?.getBoundingClientRect()
+      if (!now || (old.left === now.left && old.top === now.top)) continue
+      el.animate([{ transform: `translate(${old.left - now.left}px, ${old.top - now.top}px)` }, { transform: 'none' }], {
+        duration: 220,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+      })
+    }
+  }, [catalogs])
   return (
-    <div className="px-4 pt-4 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <TopBar back="history" label="Back" />
+    <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
+      <BackBar back="history" label="Back" />
       <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-stone-900">Catalogs</h1>
       <p className="mt-2 max-w-xl text-sm/6 text-stone-500">OPDS catalogs: public libraries like Project Gutenberg, or your own Calibre, Kavita or Mayberry server.</p>
 
@@ -707,7 +815,23 @@ function Manage({ catalogs, setCatalogs }) {
               <CatalogForm initial={c} onSave={save} onCancel={() => setEditing(null)} />
             </Card>
           ) : (
-            <Card key={c.id} className="flex items-center gap-3 p-2 pl-4">
+            <Card
+              key={c.id}
+              ref={(el) => (el ? cards.current.set(c.id, el) : cards.current.delete(c.id))}
+              className={`flex items-center gap-3 p-2 transition-shadow ${catalogs.length > 1 ? 'pl-0' : 'pl-4'} ${dragging === c.id ? 'relative z-10 shadow-lg ring-2 ring-brand-500/60' : ''}`}
+            >
+              {catalogs.length > 1 && (
+                <button
+                  aria-label={`Drag to reorder ${c.name}`}
+                  onPointerDown={(e) => dragStart(e, c.id)}
+                  onPointerMove={dragMove}
+                  onPointerUp={dragEnd}
+                  onPointerCancel={dragEnd}
+                  className="-mr-2 grid h-11 w-9 shrink-0 cursor-grab touch-none place-items-center text-stone-400 active:cursor-grabbing"
+                >
+                  <GripVertical className="size-5" />
+                </button>
+              )}
               <a href={href(c)} className="flex min-w-0 flex-1 items-center gap-3 py-2">
                 <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
                   <Server className="size-5" />
@@ -721,7 +845,7 @@ function Manage({ catalogs, setCatalogs }) {
                 <Pencil className="size-4" />
               </button>
               <button
-                onClick={() => confirm(`Remove ${c.name}?`) && setCatalogs(catalogs.filter((x) => x.id !== c.id))}
+                onClick={() => setRemoving(c)}
                 className="grid size-10 place-items-center rounded-full text-stone-400 active:bg-stone-100"
                 aria-label={`Remove ${c.name}`}
               >
@@ -744,6 +868,25 @@ function Manage({ catalogs, setCatalogs }) {
         >
           <Plus className="size-5" /> Add catalog
         </button>
+      )}
+      {removing && (
+        <Sheet title={`Remove ${removing.name}?`} onClose={() => setRemoving(null)}>
+          <p className="mt-3 text-sm/6 text-stone-600">You can add this catalog again later. Downloaded books are kept.</p>
+          <div className="mt-5 grid gap-2">
+            <button
+              onClick={() => {
+                setCatalogs(catalogs.filter((c) => c.id !== removing.id))
+                setRemoving(null)
+              }}
+              className="h-12 rounded-xl bg-red-600 text-base font-semibold text-white active:bg-red-700"
+            >
+              Remove
+            </button>
+            <button onClick={() => setRemoving(null)} className="h-12 rounded-xl bg-surface text-base font-semibold text-stone-700 ring-1 ring-stone-950/10 active:bg-stone-100">
+              Cancel
+            </button>
+          </div>
+        </Sheet>
       )}
     </div>
   )

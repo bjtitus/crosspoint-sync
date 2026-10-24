@@ -136,7 +136,7 @@ export function fanOutHighlight(
  * match live fan-out, so a later real sync collapses onto the backfilled event.
  * Returns the number of items queued.
  */
-export function backfillConnector(db: DB, userId: number, connectorId: string): number {
+export function backfillConnector(db: DB, userId: number, connectorId: string, document?: string): number {
   if (!secretsEnabled()) return 0;
   const conn = getConnector(connectorId);
   if (!conn || !conn.capabilities.write) return 0;
@@ -166,6 +166,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string): 
       updated_at: number;
     }[];
     for (const r of rows) {
+      if (document && r.document !== document) continue;
       const finished = r.percentage >= 0.98;
       const kind = finished ? 'finished' : 'progress';
       if (!carriesFor(db, userId, conn, kind)) continue;
@@ -201,6 +202,7 @@ export function backfillConnector(db: DB, userId: number, connectorId: string): 
       )
       .all(userId) as unknown as (ClippingHighlightRow & { id: string; document: string; title: string | null; author: string | null })[];
     for (const r of rows) {
+      if (document && r.document !== document) continue;
       enqueue(
         db,
         userId,

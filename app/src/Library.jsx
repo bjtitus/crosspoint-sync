@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { BookOpen, ChevronRight, Merge } from 'lucide-react'
 import { isApp } from './api.js'
 import { looksLikeSame } from './Book.jsx'
-import { STATUS, Card, Cover, EmptyAction, EmptyState, Eyebrow, ProgressBar, ago, duration, pct } from './ui.jsx'
+import { STATUS, Cover, EmptyAction, EmptyState, ProgressBar, ago, duration, pct } from './ui.jsx'
 
 function greeting() {
   const now = new Date()
@@ -15,25 +15,26 @@ function greeting() {
   return 'Hello, night owl'
 }
 
-function Hero({ session, book }) {
+function ReadingCard({ session, book }) {
   return (
     <a href={`#/book/${book.document}`} className="block">
-      <Card className="relative flex gap-4 overflow-hidden p-4 md:gap-6 md:p-6">
-        <div className="dot-field-sm pointer-events-none absolute inset-y-0 right-0 w-1/2 text-stone-200 [mask-image:linear-gradient(to_left,black,transparent)]" />
-        <Cover session={session} book={book} className="w-24 md:w-36" />
-        <div className="relative flex min-w-0 flex-1 flex-col">
-          <p className="font-mono text-[0.65rem] font-medium tracking-wider text-stone-400 uppercase">Continue reading</p>
-          <h2 className="mt-1 line-clamp-2 font-display text-lg/snug font-semibold text-stone-900 md:text-2xl/snug">{book.title || book.filename}</h2>
+      <div className="relative mt-5 flex items-start gap-4 rounded-xl bg-surface p-4 ring-1 ring-stone-950/5 md:gap-8 md:p-6">
+        <div aria-hidden="true" className="paper-grain pointer-events-none absolute inset-0 rounded-xl opacity-[0.04]" />
+        <div aria-hidden="true" className="dot-field-sm pointer-events-none absolute inset-y-0 right-0 w-1/2 rounded-r-xl text-stone-200 [mask-image:linear-gradient(to_left,black,transparent)]" />
+        <Cover session={session} book={book} className="w-28 sm:w-36 md:w-40" />
+        <div className="relative flex min-w-0 flex-1 flex-col self-stretch">
+          <p className="text-xs font-medium text-brand-600">Continue reading</p>
+          <h2 className="mt-2 line-clamp-3 font-display text-xl/snug font-semibold text-stone-900 md:text-2xl/snug">{book.title || book.filename}</h2>
           <p className="truncate text-sm text-stone-500 md:text-base">{book.author}</p>
           <div className="mt-auto pt-3 md:max-w-md">
-            <div className="mb-1.5 flex justify-between font-mono text-xs text-stone-500">
+            <div className="mb-1.5 flex justify-between text-xs tabular-nums text-stone-500">
               <span className="font-semibold text-brand-600">{pct(book.percentage)}</span>
               <span>{ago(book.timestamp)}</span>
             </div>
             <ProgressBar value={book.percentage} />
           </div>
         </div>
-      </Card>
+      </div>
     </a>
   )
 }
@@ -73,7 +74,6 @@ export default function Library({ session, books, summary, activity }) {
   const shown = sortForTab(books.filter((b) => b.status === tab), tab, activity)
   // First book that looks like another synced copy of itself.
   const dupe = books.find((b) => books.some((o) => looksLikeSame(b, o)))
-  const [hero, ...rest] = tab === 'reading' ? shown : [null, ...shown]
   // Totals count only books the library shows, as Stats does: metadata-less
   // syncs are hidden everywhere, so they mustn't add a "finished" here (#18).
   const listed = new Set(books.map((b) => b.document))
@@ -81,14 +81,11 @@ export default function Library({ session, books, summary, activity }) {
 
   return (
     <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
-      <div className="md:flex md:items-start md:justify-between md:gap-8">
-      <div>
-      <Eyebrow className="md:hidden">{greeting()}</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Your library</h1>
-      </div>
+      <p className="mb-1 inline-block -rotate-1 pr-12 font-hand text-2xl/7 text-brand-600">{greeting()}</p>
+      <h1 className="pr-12 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Your library</h1>
 
       {(summary?.devices?.length > 0 || activity) && (
-        <div className="mt-4 grid grid-cols-3 divide-x divide-stone-200 rounded-xl bg-surface py-3 text-center ring-1 ring-stone-950/5 md:mt-0 md:w-96 md:shrink-0">
+        <div className="mt-4 grid grid-cols-3 divide-x divide-stone-200 rounded-xl bg-surface py-3 text-center ring-1 ring-stone-950/5">
           {(summary?.devices?.length > 0
             ? [
                 [readingStreak(summary, activity), 'day streak'],
@@ -103,12 +100,11 @@ export default function Library({ session, books, summary, activity }) {
           ).map(([v, l]) => (
             <div key={l}>
               <p className="font-display text-xl font-semibold text-stone-900">{v}</p>
-              <p className="text-[0.7rem] text-stone-500">{l}</p>
+              <p className="text-xs text-stone-500">{l}</p>
             </div>
           ))}
         </div>
       )}
-      </div>
 
       {dupe && (
         <a href={`#/book/${dupe.document}`} className="mt-4 flex items-center gap-2 rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800 active:bg-brand-100">
@@ -120,29 +116,30 @@ export default function Library({ session, books, summary, activity }) {
         </a>
       )}
 
-      <div className="-mx-4 mt-5 md:mx-0 md:mt-8 md:px-0 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
+      <div className="-mx-4 mt-5 md:mx-0 md:mt-8 md:px-0 flex gap-5 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
         {STATUS.map((s) => (
           <button
             key={s.id}
             onClick={() => setTab(s.id)}
-            className={`flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition ${
-              tab === s.id ? 'bg-brand-500 text-white shadow-sm' : 'bg-surface text-stone-600 ring-1 ring-stone-950/10'
+            aria-pressed={tab === s.id}
+            className={`flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 py-2 text-sm font-medium transition ${
+              tab === s.id ? 'border-brand-500 text-brand-700' : 'border-transparent text-stone-500'
             }`}
           >
-            <s.icon className="size-4" strokeWidth={2} />
-            {s.label} <span className="ml-0.5 font-mono text-xs opacity-70">{counts[s.id]}</span>
+            {s.label} <span className="ml-0.5 text-xs tabular-nums">{counts[s.id]}</span>
           </button>
         ))}
       </div>
 
+      {tab === 'reading' && shown.map((book) => <ReadingCard key={book.document} session={session} book={book} />)}
+
       <div className="mt-4">
-        {hero && <Hero session={session} book={hero} />}
-        {rest.length > 0 && (
-          <Card className="mt-4 divide-y divide-stone-100 px-4 md:mt-8 md:grid md:grid-cols-4 md:gap-x-6 md:gap-y-8 md:divide-y-0 md:bg-transparent md:px-0 md:ring-0 lg:grid-cols-5 xl:grid-cols-6">
-            {rest.map((b) => (
+        {tab !== 'reading' && shown.length > 0 && (
+          <div className="divide-y divide-stone-200 md:mt-8 md:grid md:grid-cols-4 md:gap-x-6 md:gap-y-8 md:divide-y-0 lg:grid-cols-5 xl:grid-cols-6">
+            {shown.map((b) => (
               <Row key={b.document} session={session} book={b} />
             ))}
-          </Card>
+          </div>
         )}
         {shown.length === 0 && <LibraryEmpty tab={tab} hasBooks={books.length > 0} />}
       </div>

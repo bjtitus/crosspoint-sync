@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DOC, makeTestApp, md5, registerUser } from './helpers.js';
+import { hashKey } from '../src/auth/password.js';
 
 /**
  * Byte-precise replay of what the CrossPoint/CrossInk firmware's
@@ -33,6 +34,29 @@ describe('kosync protocol compatibility', () => {
     });
     expect(res.status).toBe(402);
     expect(await res.json()).toEqual({ code: 2002, message: 'Username is already registered.' });
+  });
+
+  it('treats legacy mixed-case usernames as taken and logs in case-variant duplicates', async () => {
+    const { app, db } = makeTestApp();
+    // Pre-lowercasing rows: a legacy "PiperKev" plus a later duplicate "piperkev".
+    const insert = db.prepare('INSERT INTO users (username, key_hash, created_at) VALUES (?, ?, 0)');
+    insert.run('PiperKev', hashKey(md5('old')));
+    insert.run('piperkev', hashKey(md5('new')));
+    insert.run('Eleanor', hashKey(md5('legacy')));
+
+    const create = await app.request('/users/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: 'Eleanor', password: md5('x') }),
+    });
+    expect(create.status).toBe(402);
+
+    for (const pw of ['old', 'new']) {
+      const res = await app.request('/users/auth', {
+        headers: { 'x-auth-user': 'PiperKev', 'x-auth-key': md5(pw) },
+      });
+      expect(res.status).toBe(200);
+    }
   });
 
   it('rejects registration when disabled', async () => {

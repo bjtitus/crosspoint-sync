@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, CircleCheck, Share2 } from 'lucide-react'
+import { BookOpen, CalendarDays, ChevronLeft, ChevronRight, CircleCheck } from 'lucide-react'
 import ShareSheet from './ShareSheet.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
-import { Card, Cover, EmptyState, Eyebrow, ProgressBar, ViaHardcover, duration, pct } from './ui.jsx'
+import { Card, Cover, EmptyState, ProgressBar, ShareIcon, ViaHardcover, duration, pct } from './ui.jsx'
 import { isPace, moodEmoji } from './moods.js'
 import { decodeHistory, localDay, longestReadingStreak, readingStreak, shadeLevels } from './readingHistory.js'
 
@@ -207,12 +207,11 @@ function WhatYouRead({ books }) {
   )
 }
 
-function Tiles({ tiles, action }) {
+function Tiles({ tiles }) {
   // Four columns keep eight tiles from leaving an empty cell.
   const cols = tiles.length % 4 === 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'
   return (
-    <Card className={`relative mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 ${cols}`}>
-      {action}
+    <Card className={`mt-4 grid grid-cols-2 gap-px overflow-hidden bg-stone-100 ${cols}`}>
       {tiles.map(([l, v]) => (
         <div key={l} className="bg-surface px-4 py-3">
           <p className="text-xs text-stone-500">{l}</p>
@@ -450,7 +449,7 @@ function ReadingCalendar({ byDay, view, days = [], books = [] }) {
           aria-label="Share your reading days"
           className="-my-2 -mr-2 grid size-10 place-items-center rounded-full text-brand-600 active:bg-stone-100 sm:order-last md:hover:bg-stone-100"
         >
-          <Share2 className="size-5" strokeWidth={1.75} />
+          <ShareIcon className="size-5" strokeWidth={1.75} />
         </button>
         <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-stone-200/60 p-1 sm:w-auto">
           {SCALES.map(([v, l]) => (
@@ -559,7 +558,7 @@ function Finished({ list, titles }) {
   )
 }
 
-function PagesAndBooks({ activity: all, books, onShare }) {
+function PagesAndBooks({ activity: all, books }) {
   const titles = new Map(books.map((b) => [b.document, b.title || b.filename]))
   // Only books the library shows (metadata-less ones are hidden everywhere).
   const shown = all.books.filter((b) => titles.has(b.document))
@@ -577,18 +576,7 @@ function PagesAndBooks({ activity: all, books, onShare }) {
   ]
   return (
     <section>
-      <Tiles
-        tiles={tiles}
-        action={
-          <button
-            onClick={onShare}
-            aria-label="Share your stats"
-            className="absolute top-1.5 right-1.5 z-10 grid size-10 place-items-center rounded-full text-brand-600 active:bg-stone-100 md:hover:bg-stone-100"
-          >
-            <Share2 className="size-5" strokeWidth={1.75} />
-          </button>
-        }
-      />
+      <Tiles tiles={tiles} />
       <WeeklyPages days={activity.days} />
       <Finished list={finished} titles={titles} />
       <p className="mt-3 text-xs/5 text-stone-500">
@@ -736,7 +724,7 @@ const shortDate = (d) =>
 function dayEvent(entry, act, day) {
   const on = (unix) => unix && localDay(new Date(unix * 1000)) === day
   if (on(act?.finished_at)) return { icon: CircleCheck, text: 'Finished' }
-  if (on(act?.started_at) && entry.from <= 0.02) return { icon: BookOpen, text: 'Started reading' }
+  if (entry.started || (on(act?.started_at) && entry.from <= 0.02)) return { icon: BookOpen, text: 'Started reading' }
   const span = entry.to > entry.from ? `${pct(entry.from)} to ${pct(entry.to)}` : `at ${pct(entry.to)}`
   if (entry.pages > 0) return { icon: BookOpen, text: `Read ${entry.pages} page${entry.pages === 1 ? '' : 's'} · ${span}` }
   return { icon: BookOpen, text: entry.to > entry.from ? `Read ${span}` : `Opened ${span}` }
@@ -754,8 +742,25 @@ function Timeline({ session, activity, books }) {
   const byDoc = new Map(books.map((b) => [b.document, b]))
   const acts = new Map(activity.books.map((b) => [b.document, b]))
   const reading = books.filter((b) => b.status === 'reading').sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+  // The first uploaded position is only a baseline. A chosen start date supplies
+  // its timeline event; keep later opens and any actual movement on their days.
+  const firstSyncDays = new Map()
+  for (const d of activity.days) {
+    for (const b of d.books ?? []) {
+      if (b.syncs > 0 && (!firstSyncDays.has(b.document) || d.day < firstSyncDays.get(b.document))) {
+        firstSyncDays.set(b.document, d.day)
+      }
+    }
+  }
+  const startDays = new Map(activity.days.flatMap((d) => (d.books ?? []).filter((b) => b.started).map((b) => [b.document, d.day])))
   const days = activity.days
-    .map((d) => ({ ...d, books: (d.books ?? []).filter((b) => byDoc.has(b.document) && !idleAfterFinish(b, acts.get(b.document), d.day)) }))
+    .map((d) => ({ ...d, books: (d.books ?? []).filter((b) => {
+      const act = acts.get(b.document)
+      const initialUpload = startDays.has(b.document) && firstSyncDays.get(b.document) === d.day &&
+        startDays.get(b.document) !== d.day && b.pages <= 0 && b.to <= b.from &&
+        localDay(new Date((act?.finished_at ?? 0) * 1000)) !== d.day
+      return byDoc.has(b.document) && !initialUpload && !idleAfterFinish(b, act, d.day)
+    }) }))
     .filter((d) => d.books.length)
     .reverse()
 
@@ -842,23 +847,35 @@ function Timeline({ session, activity, books }) {
   )
 }
 
-export default function Stats({ session, tab = '', summary, activity, books }) {
+export default function Stats({ session, tab = '', summary, activity, books, activityError, activityLoading, activityUpdatedAt, onRetryActivity }) {
   const hasTime = summary?.devices?.length > 0
   // Reveal daily tiles and calendar time labels together after any history, even a zero counter.
   const daily = summary?.daily?.length ? dailyReading(summary.daily) : null
   const [sharing, setSharing] = useState(false)
   const header = (
     <>
-      <Eyebrow className="md:hidden">Reading stats</Eyebrow>
       <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">How you read</h1>
       <StatsTabs tab={tab} />
+      {activityError && (
+        <div role={activity ? 'status' : 'alert'} className="mt-4 flex items-center gap-3 rounded-lg bg-surface px-3 py-1 text-xs text-stone-500 ring-1 ring-stone-950/10">
+          <p className="min-w-0 flex-1">{activity
+            ? activityUpdatedAt
+              ? <>Showing data from <time dateTime={new Date(activityUpdatedAt).toISOString()}>{new Date(activityUpdatedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</time>.</>
+              : 'Showing saved activity.'
+            : 'Reading activity is unavailable.'}</p>
+          <button type="button" onClick={onRetryActivity} disabled={activityLoading}
+            className="min-h-11 shrink-0 rounded-md px-2 font-semibold text-brand-600 disabled:opacity-50">
+            {activityLoading ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
     </>
   )
   if (tab === 'timeline') {
     return (
       <div className="px-4 pt-6 pb-4 md:px-8 md:pt-6 lg:px-12">
         {header}
-        {activity ? <Timeline session={session} activity={activity} books={books} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
+        {activity ? <Timeline session={session} activity={activity} books={books} /> : !activityError && <p className="py-6 text-sm text-stone-500">Loading…</p>}
       </div>
     )
   }
@@ -867,10 +884,28 @@ export default function Stats({ session, tab = '', summary, activity, books }) {
       {header}
       {sharing && <StatsShare summary={summary} activity={activity} books={books} onClose={() => setSharing(false)} />}
 
-      <h2 className="mt-8 font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
-      {activity ? <PagesAndBooks activity={activity} books={books} onShare={() => setSharing(true)} /> : <p className="py-6 text-sm text-stone-500">Loading…</p>}
+      {/* Share sits right of the title, as on Reading days. */}
+      <div className="mt-8 flex items-center">
+        <h2 className="mr-auto font-display text-xl font-semibold text-stone-900">Pages &amp; books</h2>
+        {activity && (
+          <button
+            type="button"
+            onClick={() => setSharing(true)}
+            aria-label="Share your stats"
+            className="-my-2 -mr-2 grid size-10 place-items-center rounded-full text-brand-600 active:bg-stone-100 md:hover:bg-stone-100"
+          >
+            <ShareIcon className="size-5" strokeWidth={1.75} />
+          </button>
+        )}
+      </div>
+      {activity ? <PagesAndBooks activity={activity} books={books} /> : !activityError && <p className="py-6 text-sm text-stone-500">Loading…</p>}
       <WhatYouRead books={books} />
 
+      {summary?.bookorbit?.excluded_sessions > 0 && (
+        <p className="mt-4 text-sm text-stone-500">
+          Duplicate BookOrbit session records are counted once. Reading from your other devices is included.
+        </p>
+      )}
       {hasTime ? (
         <>
           <h2 className="mt-10 font-display text-xl font-semibold text-stone-900">Reading time</h2>

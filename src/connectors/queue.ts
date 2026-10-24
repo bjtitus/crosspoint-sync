@@ -112,4 +112,15 @@ export function queueDepth(db: DB, userId: number, connectorId: string): { pendi
   return { pending: row.pending ?? 0, dead: row.dead ?? 0 };
 }
 
+/** Account-scoped delivery errors, grouped so one bad book cannot flood Settings. */
+export function queueErrors(db: DB, userId: number, connectorId: string): { kind: string; message: string; count: number }[] {
+  return db.prepare(`SELECT CASE WHEN kind LIKE 'highlight:%' OR kind = 'highlight' THEN 'clipping' ELSE kind END AS kind,
+      last_error AS message, COUNT(*) AS count
+    FROM connector_queue WHERE user_id = ? AND connector_id = ?
+      AND status IN ('pending', 'dead') AND last_error IS NOT NULL
+    GROUP BY CASE WHEN kind LIKE 'highlight:%' OR kind = 'highlight' THEN 'clipping' ELSE kind END, last_error
+    ORDER BY MAX(updated_at) DESC, last_error LIMIT 3`)
+    .all(userId, connectorId) as { kind: string; message: string; count: number }[];
+}
+
 export const _internals = { MAX_ATTEMPTS, BACKOFF, withTransaction };

@@ -12,11 +12,13 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.File
 
 class MainActivity : TauriActivity() {
@@ -62,6 +64,40 @@ class MainActivity : TauriActivity() {
     super.onDestroy()
   }
 
+  // Native pull-to-refresh: wry hands its WebView to setContentView (after
+  // onWebViewCreate), so wrap it here. A pull fires `crosspoint-refresh` in the page;
+  // the page calls CrossPointRefresh.done() once its data is back, and turns pulling
+  // off while a sheet is open (its own scroll would otherwise read as a pull).
+  private var refresher: SwipeRefreshLayout? = null
+  @Volatile private var refreshEnabled = true
+
+  override fun setContentView(view: View?) {
+    if (view !is WebView) return super.setContentView(view)
+    val swipe = SwipeRefreshLayout(this).apply {
+      // MATCH_PARENT, not addView's WRAP_CONTENT default: a wrap-content WebView reports
+      // a zero viewport height, so every vh/dvh unit in the page becomes 0 (sheets'
+      // max-h-[92dvh] collapsed to nothing).
+      addView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+      setColorSchemeColors(0xFF4A7A62.toInt())
+      setOnChildScrollUpCallback { _, _ -> !refreshEnabled || view.canScrollVertically(-1) }
+      setOnRefreshListener { view.evaluateJavascript("dispatchEvent(new Event('crosspoint-refresh'))", null) }
+    }
+    refresher = swipe
+    super.setContentView(swipe)
+  }
+
+  inner class RefreshBridge {
+    @JavascriptInterface
+    fun done() {
+      runOnUiThread { refresher?.isRefreshing = false }
+    }
+
+    @JavascriptInterface
+    fun setEnabled(enabled: Boolean) {
+      refreshEnabled = enabled
+    }
+  }
+
   // Android's WebView has no Web Share API, so the app shares clipping cards
   // through this bridge: window.CrossPointShare.share(text, pngBase64, title).
   override fun onWebViewCreate(webView: WebView) {
@@ -77,6 +113,7 @@ class MainActivity : TauriActivity() {
     webView.addJavascriptInterface(WidgetBridge(), "CrossPointWidget")
     webView.addJavascriptInterface(ThemeBridge(), "CrossPointTheme")
     webView.addJavascriptInterface(FilesBridge(), "CrossPointFiles")
+    webView.addJavascriptInterface(RefreshBridge(), "CrossPointRefresh")
   }
 
   // Saves through MediaStore so images land in the gallery (Pictures/CrossPoint Sync)
