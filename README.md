@@ -39,6 +39,10 @@ For local image builds from the checkout, use:
 docker compose -f docker-compose.dev.yml up -d --build
 ```
 
+To serve under a subpath, pass `-e BASE_PATH=/crosspoint-sync` to `docker run`,
+or run `BASE_PATH=/crosspoint-sync docker compose up -d`. The same image works
+at any prefix; no frontend rebuild is needed.
+
 ### HTTPS reverse proxy (Caddy, nginx, etc.)
 
 When the proxy handles HTTPS and forwards HTTP to Sync, set `TRUST_PROXY=true`
@@ -110,13 +114,15 @@ services.crosspoint-sync = {
   enable = true;
   port = 8080;
   registration = true;
+  # Optional: serve at /crosspoint-sync/ instead of /.
+  basePath = "/crosspoint-sync";
 };
 ```
 
 ### Bare Node (≥ 22.13)
 
 ```sh
-npm ci && npm run build
+npm ci && npm run build && npm run build:frontend
 DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 ```
 
@@ -126,6 +132,7 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 |---------|---------|---------|
 | `PORT` | `8080` | Listen port |
 | `LISTEN_ADDRESS` | `localhost` (`::` in the Docker image) | Interface to listen on. `::` listens on all of them, which a container needs to be reachable. |
+| `BASE_PATH` | _(empty)_ | URL prefix, e.g. `/crosspoint-sync`. Empty or `/` serves at the domain root; trailing slashes are normalized. Applies to the website, API, and health endpoint (`/crosspoint-sync/healthz` in this example). Set at runtime; no frontend rebuild needed. Reverse proxies must preserve the prefix, not strip it. |
 | `DATABASE_PATH` | `/data/crosspoint.db` | SQLite file (parent dirs auto-created) |
 | `REGISTRATION_DISABLED` | `false` | Set `true` to lock down a private instance |
 | `AUTH_RATE_LIMIT_PER_MINUTE` | `30` | Per-IP limit on registration (0 disables) |
@@ -138,6 +145,11 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `SEARCHAPI_KEY` | _(unset)_ | Optional, paid ([searchapi.io](https://www.searchapi.io)). Last fallback for print page counts: Amazon search + product "Print length", 2 requests per book, only for books the free sources miss. Cached forever. |
 | `SEEKQUEL_URL` | `https://api.seekquel.app` | Optional. The Seekquel API the Seekquel connector links to and sends to. Only for testing against a local Seekquel. |
 | `CORS_ORIGINS` | `*` | Origins allowed to call the sync API from browsers (comma-separated). The default wildcard is safe: the API authenticates with headers, not cookies, and the web UI's cookie routes never get CORS headers. |
+
+With `BASE_PATH=/crosspoint-sync`, open `https://your-host/crosspoint-sync/`
+and configure readers with `https://your-host/crosspoint-sync` as their server
+URL. OAuth providers must allow the prefixed callback URL shown in Settings.
+Native app association files, when enabled, remain at domain-root `/.well-known/`.
 
 ### Link Micro.blog
 
