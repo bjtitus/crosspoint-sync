@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { ChartColumn, CloudOff, Compass, Quote, Eye, EyeOff, LibraryBig, Loader2, Lock, Send as SendIcon, Server, Settings as SettingsIcon, User } from 'lucide-react'
 import { useTheme } from './theme.js'
 import { DEFAULT_SERVER, api, hostedServer, isApp, lastServer, loadSession, login, logout, offline, cached, register, saveSession } from './api.js'
@@ -13,6 +14,7 @@ import Browse from './Browse.jsx'
 import Clippings from './Clippings.jsx'
 import { clearWidget, updateWidget } from './widget.js'
 import InstallPrompt from './Install.jsx'
+import { mountTabBar, nativeTabBar, selectNativeTab, useNativeButton } from './tabbar.js'
 
 // A filled, full-width field with a leading icon: the native mobile idiom.
 function Field({ icon: Icon, trailing, inputRef, ...props }) {
@@ -65,7 +67,7 @@ function Login({ onLogin }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-stone-50 md:flex-row">
+    <div className="flex min-h-screen-safe flex-col bg-stone-50 md:flex-row">
       <div className="relative m-3 h-[36dvh] min-h-60 shrink-0 overflow-hidden rounded-[28px] bg-brand-900 md:m-4 md:h-auto md:flex-1">
         <img src={`${import.meta.env.BASE_URL}hero.jpg`} alt="" className="absolute inset-0 size-full object-cover" />
         <div className="absolute inset-0 bg-gradient-to-t from-brand-950/95 via-brand-950/40 to-transparent" />
@@ -81,7 +83,7 @@ function Login({ onLogin }) {
 
       <form
         onSubmit={submit}
-        className="flex flex-1 flex-col px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-md md:justify-center md:px-10 lg:max-w-lg lg:px-16"
+        className="flex flex-1 flex-col px-5 pt-4 pb-5 md:max-w-md md:justify-center md:px-10 lg:max-w-lg lg:px-16"
       >
         <h2 className="font-display text-2xl font-semibold text-stone-900">{creating ? 'Create your account' : 'Sign in'}</h2>
         <p className="mt-1 text-sm/6 text-stone-500">
@@ -164,7 +166,7 @@ function Login({ onLogin }) {
 
         {error && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
-        <div className="mt-auto pt-6 md:mt-8">
+        <div className="mx-auto mt-auto w-full max-w-sm px-2 pt-6 md:mt-8 md:max-w-none md:px-0">
           <button
             disabled={busy}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm transition active:scale-[0.98] active:bg-brand-600 disabled:opacity-60"
@@ -213,16 +215,30 @@ const BACK_LABELS = { stats: 'Stats', clippings: 'Clippings', browse: 'Browse', 
 const backTo = (hash) => ({ href: hash, label: BACK_LABELS[hash.replace(/^#\/?/, '').split('/')[0]] ?? 'Library' })
 
 const NAV = [
-  { href: '#/', label: 'Library', icon: LibraryBig, active: (r) => !['stats', 'send', 'browse', 'clippings', 'settings'].includes(r) },
+  { href: '#/', label: 'Library', icon: LibraryBig, sf: 'books.vertical', active: (r) => !['stats', 'send', 'browse', 'clippings', 'settings'].includes(r) },
   // Browse and Send need the app (catalog access and the reader on your Wi-Fi), so the web leaves them out.
-  ...(isApp ? [{ href: '#/browse', label: 'Browse', icon: Compass, active: (r) => r === 'browse' }] : []),
-  { href: '#/clippings', label: 'Clippings', icon: Quote, active: (r) => r === 'clippings' },
-  { href: '#/stats', label: 'Stats', icon: ChartColumn, active: (r) => r === 'stats' },
-  ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, active: (r) => r === 'send' }] : []),
+  ...(isApp ? [{ href: '#/browse', label: 'Browse', icon: Compass, sf: 'safari', active: (r) => r === 'browse' }] : []),
+  { href: '#/clippings', label: 'Clippings', icon: Quote, sf: 'quote.opening', active: (r) => r === 'clippings' },
+  { href: '#/stats', label: 'Stats', icon: ChartColumn, sf: 'chart.bar', active: (r) => r === 'stats' },
+  ...(isApp ? [{ href: '#/send', label: 'Send', icon: SendIcon, sf: 'paperplane', active: (r) => r === 'send' }] : []),
 ]
 
-// Phone: bottom tab bar.
+function endRefresh() {
+  window.CrossPointRefresh?.done() // Android
+  if (isApp) invoke('end_refresh').catch(() => {}) // iOS
+}
+
+// Phone: bottom tab bar (native on iPhone, see tabbar.js).
 function TabBar({ route }) {
+  const current = NAV.find((n) => n.active(route))?.href
+  useEffect(() => {
+    if (nativeTabBar) return mountTabBar(NAV.map((n) => ({ id: n.href, title: n.label, sfSymbol: n.sf })), current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    if (nativeTabBar && current) selectNativeTab(current)
+  }, [current])
+  if (nativeTabBar) return null
   const cls = (active) =>
     `flex flex-1 flex-col items-center gap-0.5 pt-2 pb-1.5 text-[0.7rem] font-semibold ${active ? 'text-brand-600' : 'text-stone-500'}`
   return (
@@ -239,16 +255,14 @@ function TabBar({ route }) {
   )
 }
 
-// Phone: settings gear top right, opening the Settings page.
-function SettingsLink({ active }) {
+// Phone: settings gear top right of the Library, opening the Settings page.
+function SettingsLink() {
+  useNativeButton('settings', { sfSymbol: 'gearshape', anchor: 'topTrailing' }, () => (location.hash = '#/settings'))
   return (
     <a
       href="#/settings"
       aria-label="Settings"
-      aria-current={active ? 'page' : undefined}
-      className={`absolute top-4 right-3 z-20 grid size-11 place-items-center rounded-full active:bg-stone-200/70 md:hidden ${
-        active ? 'text-brand-600' : 'text-stone-600'
-      }`}
+      className="native-hide absolute top-4 right-3 z-20 grid size-11 place-items-center rounded-full text-stone-600 active:bg-stone-200/70 md:hidden"
     >
       <SettingsIcon className="size-6" strokeWidth={1.75} />
     </a>
@@ -258,7 +272,7 @@ function SettingsLink({ active }) {
 // iPad / desktop: sidebar.
 function Sidebar({ route, session }) {
   return (
-    <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-stone-200 bg-surface/60 px-4 py-6 md:flex lg:w-64">
+    <aside className="sticky top-[env(safe-area-inset-top)] hidden h-screen-safe w-60 shrink-0 flex-col border-r border-stone-200 bg-surface/60 px-4 py-6 md:flex lg:w-64">
       {/* 44px band at the top, matching each page's first row (back button / title). */}
       <div className="flex h-11 items-center gap-2.5 px-2">
         <img src={`${import.meta.env.BASE_URL}logo.png`} alt="" className="size-8 rounded-lg" />
@@ -339,6 +353,32 @@ function Home({ session, onSession, onLogout, theme }) {
     return () => document.removeEventListener('visibilitychange', on)
   })
 
+  // Native pull-to-refresh (iOS refresh control, Android SwipeRefreshLayout): reload
+  // everything, then let the spinner go once the books are back.
+  const [pulling, setPulling] = useState(false)
+  const sawLoading = useRef(false)
+  useEffect(() => {
+    const on = () => {
+      sawLoading.current = false
+      setPulling(true)
+      reloadBooks()
+      reloadSummary()
+      reloadActivity()
+    }
+    addEventListener('crosspoint-refresh', on)
+    return () => removeEventListener('crosspoint-refresh', on)
+  })
+  useEffect(() => {
+    if (!pulling) return
+    if (booksLoading) sawLoading.current = true
+    else if (sawLoading.current) setPulling(false)
+  }, [pulling, booksLoading])
+  useEffect(() => {
+    if (!pulling) return endRefresh()
+    const t = setTimeout(() => setPulling(false), 15000) // never leave it spinning
+    return () => clearTimeout(t)
+  }, [pulling])
+
   let page
   if (route === 'settings') page = id ? <Matches session={session} id={id} /> : <Settings session={session} theme={theme} onSession={onSession} onLogout={onLogout} />
   else if (route === 'send' && isApp) page = id === 'wallpaper' ? <Wallpaper /> : <Send />
@@ -366,17 +406,17 @@ function Home({ session, onSession, onLogout, theme }) {
   else page = <Library session={session} books={books} summary={summary} activity={activity} />
 
   return (
-    <div className="min-h-dvh md:flex">
+    <div className="min-h-screen-safe md:flex">
       <Sidebar route={route} session={session} />
       <main className="relative mx-auto w-full min-w-0 max-w-xl pb-24 md:max-w-6xl md:pb-10">
         {isOffline && (
-          <div className="sticky top-0 z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
+          <div className="sticky top-[env(safe-area-inset-top)] z-30 flex items-center justify-center gap-2 bg-stone-800 px-4 py-2 text-xs font-medium text-stone-100">
             <CloudOff className="size-3.5" /> Offline. Showing what was saved on this device.
           </div>
         )}
-        {/* Sub-screens (a book, a service's matches, a catalog...) have a back link instead. Stats' second segment is just its tab. */}
-        {(parts.length < 2 || route === 'stats') && <SettingsLink active={route === 'settings'} />}
-        <RefreshPill active={booksLoading && !!books} />
+        {/* Settings opens from the Library only; sub-screens have a back link instead. */}
+        {parts.length < 2 && NAV[0].active(route) && <SettingsLink />}
+        <RefreshPill active={booksLoading && !!books && !pulling} />
         <Toaster />
         {page}
       </main>
@@ -391,7 +431,7 @@ export default function App() {
   useEffect(() => {
     if (!session) clearWidget()
   }, [session])
-  if (!session) return <Login onLogin={setSession} />
+  if (!session) return <Login onLogin={(s) => (window.scrollTo(0, 0), setSession(s))} />
   return (
     <LoadCacheProvider key={JSON.stringify([session.server, session.username])}>
       <Home

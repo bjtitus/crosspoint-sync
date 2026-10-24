@@ -8,6 +8,9 @@
   "permissions": [
     "core:default",
     "deep-link:default",
+    "haptics:allow-impact-feedback",
+    "haptics:allow-selection-feedback",
+    "system-components:default",
     {
       "identifier": "http:default",
       "allow": [

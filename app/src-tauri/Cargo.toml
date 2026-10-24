@@ -13,7 +13,7 @@ tauri-build = { version = "2.3.0", features = [] }
 [dependencies]
 tauri = { version = "2.6.2", features = [] }
 tauri-plugin-http = "2"
-# OPDS browsing, downloads and the EPUB image optimizer (ported from common-stacks).
+# OPDS browsing and downloads (ported from common-stacks).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart", "gzip"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -22,16 +22,20 @@ url = "2.5"
 quick-xml = "0.39"
 base64 = "0.22"
 sanitize-filename = "0.6"
+unicode-normalization = "0.1"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 tokio = { version = "1", features = ["time"] }
 tauri-plugin-opener = "2"
 # https app links back from browser sign-in.
 tauri-plugin-deep-link = "2"
+tauri-plugin-haptics = "2"
+# Native Liquid Glass tab bar on iPhone (stubs elsewhere). One-person 0.x crate: pinned.
+tauri-plugin-system-components = "=0.1.8"
 
 [target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSData", "NSFileManager", "NSString", "NSURL"] }
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIImage", "UIImagePickerController"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIControl", "UIImage", "UIImagePickerController", "UIRefreshControl", "UIResponder", "UIView"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

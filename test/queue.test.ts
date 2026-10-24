@@ -6,6 +6,7 @@ import {
   markDone,
   markFailed,
   queueDepth,
+  queueErrors,
   _internals,
 } from '../src/connectors/queue.js';
 import type { OutboundEvent } from '../src/connectors/types.js';
@@ -29,6 +30,21 @@ const ev = (over: Partial<OutboundEvent> = {}): OutboundEvent => ({
 });
 
 describe('connector queue', () => {
+  it('groups delivery errors by type and removes recovered errors from the status', () => {
+    const db = freshDb();
+    for (const key of ['highlight:a', 'highlight:b']) {
+      enqueue(db, 1, 'bookorbit', ev({ kind: 'highlight' }), key, 100);
+    }
+    const rows = claimReady(db, 10, 100);
+    for (const row of rows) markFailed(db, row, 'clipping has no position', false, 100);
+    expect(queueErrors(db, 1, 'bookorbit')).toEqual([{ kind: 'clipping', message: 'clipping has no position', count: 2 }]);
+    expect(queueErrors(db, 1, 'hardcover')).toEqual([]);
+    enqueue(db, 1, 'bookorbit', ev({ kind: 'highlight' }), 'highlight:a', 101);
+    expect(queueErrors(db, 1, 'bookorbit')[0].count).toBe(1);
+    markDone(db, rows[1].id, 102);
+    expect(queueErrors(db, 1, 'bookorbit')).toEqual([]);
+  });
+
   it('coalesces same (connector, document, kind) to the latest payload', () => {
     const db = freshDb();
     enqueue(db, 1, 'hardcover', ev({ percentage: 0.3 }), 'progress', 100);

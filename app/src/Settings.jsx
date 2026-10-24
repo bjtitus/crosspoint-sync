@@ -4,7 +4,8 @@ import { onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, Monitor, Moon, RefreshCw, Search, Server, Sun, Trash2, UserX } from 'lucide-react'
 import SparkMD5 from 'spark-md5'
 import { api, isApp } from './api.js'
-import { Bone, Card, EmptyState, Eyebrow, notify, Toggle, useLoad } from './ui.jsx'
+import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
+import { useNativeBack } from './tabbar.js'
 
 // Appearance: follow the system, or force light or dark.
 const THEMES = [
@@ -44,15 +45,10 @@ const HINTS = {
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   jellyfin: 'Syncs reading progress with your Jellyfin book library (Jellyfin 12.0 or newer). Sign in with your Jellyfin username and password.',
-  bookorbit: 'Syncs progress both ways with your BookOrbit server, and adds your clippings as highlights.',
+  bookorbit: 'Syncs progress both ways, adds clippings as highlights, and exchanges reading sessions for matched books. Imports BookOrbit history and exports sessions recorded by newer CrossInk firmware. Includes other BookOrbit reader history alongside your device stats. Repeated sessions are counted once.',
+  seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You approve the request in the Seekquel app.',
   spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
   kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
-}
-
-const SERVER_URL_EXAMPLE = {
-  jellyfin: 'https://jellyfin.example.com',
-  bookorbit: 'https://books.example.com',
-  kosync: 'https://sync.koreader.rocks',
 }
 // Where to get a token, for the services that use one.
 const TOKEN_HELP = {
@@ -402,13 +398,11 @@ export function LinkForm({ session, conn, onLinked }) {
       </div>
     )
   } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
-    const serverPlaceholder = SERVER_URL_EXAMPLE[conn.id] ?? SERVER_URL_EXAMPLE.kosync
-    const connectLabel = conn.id === 'jellyfin' ? 'Connect Jellyfin' : 'Connect'
     body = (
       <form className="space-y-2">
         <input
           className={`${field} font-mono`}
-          placeholder={serverPlaceholder}
+          placeholder={{ bookorbit: 'https://books.example.com', jellyfin: 'https://jellyfin.example.com' }[conn.id] ?? 'https://sync.koreader.rocks'}
           value={v.server ?? ''}
           onChange={set('server')}
           inputMode="url"
@@ -416,7 +410,7 @@ export function LinkForm({ session, conn, onLinked }) {
         />
         <input className={field} placeholder="Username" value={v.username ?? ''} onChange={set('username')} autoCapitalize="none" autoComplete="off" />
         <input className={field} type="password" placeholder="Password" value={v.password ?? ''} onChange={set('password')} autoComplete="off" />
-        {submit(connectLabel, () => ({
+        {submit(conn.id === 'jellyfin' ? 'Connect Jellyfin' : 'Connect', () => ({
           server: (v.server ?? '').trim(),
           username: (v.username ?? '').trim(),
           password: v.password ?? '',
@@ -456,6 +450,7 @@ export function LinkForm({ session, conn, onLinked }) {
 }
 
 function Service({ session, conn, onChange }) {
+  const [unlinking, setUnlinking] = useState(false)
   const [openForm, setOpenForm] = useState(false)
   const [busy, setBusy] = useState(null)
   const needsRelink = conn.linked && conn.status === 'needs_reauth'
@@ -476,14 +471,6 @@ function Service({ session, conn, onChange }) {
     } finally {
       setBusy(null)
     }
-  }
-  const unlink = () => {
-    if (!confirm(`Unlink ${conn.name}? Its book matches and any queued syncs are removed.`)) return
-    act(
-      'unlink',
-      () => api.unlinkConnector(session, conn.id),
-      () => notify({ title: `${conn.name} unlinked` }),
-    )
   }
 
   return (
@@ -519,7 +506,7 @@ function Service({ session, conn, onChange }) {
                   const r = await api.syncConnector(session, conn.id)
                   notify({
                     title: `Syncing to ${conn.name}`,
-                    detail: r?.queued ? `${r.queued} book${r.queued === 1 ? '' : 's'} queued` : 'Everything is up to date',
+                    detail: r?.queued ? `${r.queued} item${r.queued === 1 ? '' : 's'} queued` : 'No synced items to queue',
                   })
                 })
               }
@@ -530,7 +517,7 @@ function Service({ session, conn, onChange }) {
             <button
               type="button"
               disabled={!!busy}
-              onClick={unlink}
+              onClick={() => setUnlinking(true)}
               className="h-9 rounded-full px-3 text-sm font-medium text-red-600 active:bg-stone-100 md:hover:bg-stone-100"
             >
               {busy === 'unlink' ? <Loader2 className="size-4 animate-spin" /> : 'Unlink'}
@@ -546,6 +533,35 @@ function Service({ session, conn, onChange }) {
           </button>
         )}
       </div>
+      {unlinking && (
+        <ActionSheet title={`Unlink ${conn.name}?`} actionLabel="Unlink" pendingLabel="Unlinking…" danger onClose={() => setUnlinking(false)} onConfirm={async () => {
+          setBusy('unlink')
+          try {
+            await api.unlinkConnector(session, conn.id)
+            notify({ title: `${conn.name} unlinked` })
+            onChange()
+          } finally {
+            setBusy(null)
+          }
+        }}>
+          Its book matches and any queued syncs are removed.
+        </ActionSheet>
+      )}
+      {conn.linked && (conn.queue?.pending > 0 || conn.queue?.dead > 0) && (
+        <p role="status" className="mt-2 text-xs text-stone-500">
+          {[conn.queue.pending > 0 && `${conn.queue.pending} item${conn.queue.pending === 1 ? '' : 's'} waiting to sync`,
+            conn.queue.dead > 0 && `${conn.queue.dead} item${conn.queue.dead === 1 ? '' : 's'} failed`].filter(Boolean).join(' · ')}
+        </p>
+      )}
+      {conn.linked && conn.queue_errors?.length > 0 && (
+        <div role="alert" className="mt-2 space-y-1 text-xs text-red-700">
+          {conn.queue_errors.map((e) => (
+            <p key={`${e.kind}:${e.message}`}>
+              {e.count} {e.kind === 'clipping' ? 'clipping' : 'progress update'}{e.count === 1 ? '' : 's'}: {e.message}
+            </p>
+          ))}
+        </div>
+      )}
       {conn.linked && !needsRelink && conn.options && (
         <Options conn={conn} save={(v) => act('options', () => api.setConnectorOptions(session, conn.id, v))} />
       )}
@@ -592,7 +608,15 @@ function Options({ conn, save }) {
 }
 
 function Services({ session }) {
-  const [data, error, reload] = useLoad(() => api.connectors(session), [session], `connectors ${session.username}@${session.server}`)
+  const [data, error, reload, loading] = useLoad(() => api.connectors(session), [session], `connectors ${session.username}@${session.server}`)
+  const reloadRef = useRef(reload)
+  reloadRef.current = reload
+  const pending = data?.connectors?.some((c) => c.linked && c.queue?.pending > 0)
+  useEffect(() => {
+    if (!pending || loading) return
+    const timer = setTimeout(() => reloadRef.current(), 5000)
+    return () => clearTimeout(timer)
+  }, [pending, loading, data])
   if (error && !data) return <p className="py-4 text-sm text-stone-500">Couldn&apos;t load services ({error.message}).</p>
   if (!data) return <Loader2 className="mx-auto my-6 size-5 animate-spin text-stone-400" />
   if (data.encryption === 'disabled') {
@@ -610,6 +634,7 @@ function Services({ session }) {
 
 // Password, clear data, delete: what the website's account page did.
 function Account({ session, onSession, onLogout }) {
+  const [action, setAction] = useState(null)
   const [editing, setEditing] = useState(false)
   const [pw, setPw] = useState({ next: '', again: '' })
   const [busy, setBusy] = useState(null)
@@ -640,32 +665,10 @@ function Account({ session, onSession, onLogout }) {
       })
     })
   }
-  const clearData = () => {
-    if (
-      !confirm(
-        'Clear all your reading data? Progress, clippings, stats and linked services are deleted. Your account stays, and readers sync again from scratch.',
-      )
-    )
-      return
-    run('clear', async () => {
-      await api.clearData(session)
-      notify({ title: 'Reading data cleared' })
-      location.hash = '#/'
-      location.reload()
-    })
-  }
-  const deleteAccount = () => {
-    const typed = prompt(`This deletes the account and everything in it, for good. Type ${session.username} to confirm.`)
-    if (typed?.trim() !== session.username) return
-    run('delete', async () => {
-      await api.deleteAccount(session)
-      onLogout()
-    })
-  }
 
   return (
     <Card className="mt-3 divide-y divide-stone-100">
-      <button type="button" onClick={() => setEditing(!editing)} className={`${row} text-stone-800`}>
+      <button type="button" disabled={!!busy || !!action} onClick={() => setEditing(!editing)} className={`${row} text-stone-800`}>
         <KeyRound className="size-4 text-stone-400" />
         <span className="flex-1">Change sync password</span>
         <ChevronRight className={`size-4 text-stone-400 transition ${editing ? 'rotate-90' : ''}`} />
@@ -689,32 +692,69 @@ function Account({ session, onSession, onLogout }) {
             autoComplete="new-password"
           />
           <button
-            disabled={busy === 'password'}
+            disabled={!!busy || !!action}
             className="flex h-11 w-full items-center justify-center rounded-xl bg-brand-500 text-sm font-semibold text-white transition active:scale-[0.98] disabled:opacity-50"
           >
             {busy === 'password' ? <Loader2 className="size-4 animate-spin" /> : 'Save password'}
           </button>
         </form>
       )}
-      <button type="button" disabled={!!busy} onClick={clearData} className={`${row} text-red-600`}>
+      <button type="button" disabled={!!busy || !!action} onClick={() => setAction('clear')} className={`${row} text-red-600`}>
         {busy === 'clear' ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
         Clear reading data
       </button>
-      <button type="button" disabled={!!busy} onClick={deleteAccount} className={`${row} text-red-600`}>
+      <button type="button" disabled={!!busy || !!action} onClick={() => setAction('delete')} className={`${row} text-red-600`}>
         {busy === 'delete' ? <Loader2 className="size-4 animate-spin" /> : <UserX className="size-4" />}
         Delete account
       </button>
+      {action && (
+        <ActionSheet
+          key={action}
+          title={action === 'clear' ? 'Clear reading data?' : 'Delete account?'}
+          actionLabel={action === 'clear' ? 'Clear reading data' : 'Delete account'}
+          pendingLabel={action === 'clear' ? 'Clearing…' : 'Deleting…'}
+          danger
+          inputLabel={action === 'delete' ? 'Username' : undefined}
+          isValid={(value) => action !== 'delete' || value === session.username}
+          onClose={() => setAction(null)}
+          onConfirm={async () => {
+            setBusy(action)
+            try {
+              if (action === 'clear') {
+                await api.clearData(session)
+                notify({ title: 'Reading data cleared' })
+                location.hash = '#/'
+                location.reload()
+              } else {
+                await api.deleteAccount(session)
+                onLogout()
+              }
+            } finally {
+              setBusy(null)
+            }
+          }}
+        >
+          {action === 'clear'
+            ? 'Progress, clippings, stats and linked services are deleted. Your account stays, and readers sync again from scratch.'
+            : `This deletes the account and everything in it, for good. Type ${session.username} to confirm.`}
+        </ActionSheet>
+      )}
     </Card>
   )
 }
 
 export default function Settings({ session, theme, onSession, onLogout }) {
+  useNativeBack('#/')
   const host = new URL(session.server).host
   const section = 'mt-8 font-display text-xl font-semibold text-stone-900'
   return (
-    <div className="max-w-2xl px-4 pt-6 pb-8 md:px-8 md:pt-6 lg:px-12">
-      <Eyebrow className="md:hidden">Your account</Eyebrow>
-      <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-0 md:flex md:h-11 md:items-center md:text-4xl">Settings</h1>
+    <div className="settings-page max-w-2xl px-4 pt-2 pb-8 md:px-8 md:pt-6 lg:px-12">
+      <div className="settings-header flex min-h-11 items-center gap-6">
+        <a href="#/" aria-label="Back to Library" className="native-hide grid size-11 shrink-0 place-items-center rounded-full text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100">
+          <ArrowLeft className="size-6" strokeWidth={2} />
+        </a>
+        <h1 className="font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Settings</h1>
+      </div>
 
       <Card className="mt-6 flex items-center gap-3 p-4">
         <div className="grid size-11 shrink-0 place-items-center rounded-full bg-brand-50 font-display text-lg font-semibold text-brand-700">
@@ -765,6 +805,7 @@ export default function Settings({ session, theme, onSession, onLogout }) {
 // One service's matches: which book there each synced title maps to. Fix wrong
 // ones, pick one for books that didn't match, or stop syncing a book.
 export function Matches({ session, id }) {
+  useNativeBack('#/settings')
   const [conns] = useLoad(() => api.connectors(session), [session], `connectors ${session.username}@${session.server}`)
   const [books, error, reload] = useLoad(() => api.review(session, id), [session, id])
   const [picking, setPicking] = useState(null)
@@ -773,10 +814,12 @@ export function Matches({ session, id }) {
 
   return (
     <div className="max-w-2xl px-4 pt-6 pb-8 md:px-8 md:pt-6 lg:px-12">
-      <a href="#/settings" className="inline-flex items-center gap-1.5 text-sm font-medium text-stone-500">
-        <ArrowLeft className="size-4" /> Settings
-      </a>
-      <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">{name} matches</h1>
+      <div className="mb-6 flex h-11 items-center md:mb-0">
+        <a href="#/settings" className="native-hide flex h-11 items-center gap-1.5 text-sm font-medium text-stone-500">
+          <ArrowLeft className="size-4" /> Settings
+        </a>
+      </div>
+      <h1 className="font-display text-3xl font-semibold tracking-tight text-stone-900 md:mt-3 md:text-4xl">{name} matches</h1>
       <p className="mt-1 text-sm/6 text-stone-500">Which book on {name} each title you read maps to. Fix any that matched wrong.</p>
 
       {error && !books ? (

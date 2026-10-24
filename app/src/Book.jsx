@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CalendarDays, Hash, MoreHorizontal, PenLine, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Share2, Star, X } from 'lucide-react'
+import { ArrowLeft, CalendarDays, Hash, MoreHorizontal, PenLine, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Star } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
 import ShareSheet from './ShareSheet.jsx'
+import { useNativeBack, useNativeButton } from './tabbar.js'
 import SpotifyCard from './SpotifyCard.jsx'
 import { Picker } from './Settings.jsx'
-import { STATUS, Card, Cover, EmptyState, ErrorNote, ProgressBar, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
+import { STATUS, ActionSheet, Card, Cover, EmptyState, ErrorNote, ProgressBar, ShareIcon, Sheet, Spinner, ViaHardcover, ago, duration, notify, pct, useLoad } from './ui.jsx'
 
 const date = (unix, opts) =>
   unix ? new Date(unix * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', ...opts }) : null
@@ -15,32 +16,34 @@ const calendarDate = (unix) => date(unix, { timeZone: 'UTC' })
 
 function StatusPicker({ session, book, onChange }) {
   const [busy, setBusy] = useState(null)
+  const [error, setError] = useState(null)
   async function pick(id) {
     setBusy(id)
+    setError(null)
     try {
       await api.setStatus(session, book.document, id)
       onChange()
+    } catch (err) {
+      setError(err.message || "Couldn’t update reading status. Try again.")
     } finally {
       setBusy(null)
     }
   }
   return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-      {STATUS.map((s) => (
-        <button
-          key={s.id}
+    <div>
+      <label className="flex min-h-11 items-center justify-between gap-4 border-y border-stone-200 py-2 text-sm text-stone-500">
+        Reading status
+        <select
+          value={book.status}
           disabled={busy !== null}
-          onClick={() => pick(s.id)}
-          className={`flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-semibold whitespace-nowrap transition disabled:opacity-60 ${
-            book.status === s.id
-              ? 'bg-brand-500 text-white shadow-sm'
-              : 'bg-surface text-stone-700 shadow-sm ring-1 ring-stone-950/10 active:bg-stone-50'
-          }`}
+          onChange={(e) => pick(e.target.value)}
+          className="min-h-11 max-w-full rounded-lg bg-transparent px-2 text-base font-medium text-brand-700 disabled:opacity-60"
         >
-          <s.icon className="size-4" strokeWidth={2} />
-          {busy === s.id ? '…' : s.label}
-        </button>
-      ))}
+          {STATUS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+        </select>
+      </label>
+      {busy && <p role="status" className="mt-2 text-sm text-stone-500">Saving status…</p>}
+      {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
     </div>
   )
 }
@@ -58,9 +61,9 @@ function useWide() {
   return wide
 }
 
-function Stats({ session, doc, aliases, activity: a, wide = false }) {
+function Stats({ session, doc, aliases, activity: a, wide = false, revision = 0 }) {
   // Merging or separating copies changes which stats count, so refetch then.
-  const [data] = useLoad(() => api.bookStats(session, doc), [session, doc, aliases?.join()], `bookstats:${doc}`)
+  const [data] = useLoad(() => api.bookStats(session, doc), [session, doc, aliases?.join(), revision], `bookstats:${doc}`)
   const c = data?.combined
   let cells
   if (c?.sessions) {
@@ -190,8 +193,8 @@ export function DeleteClip({ session, clip, document, onDone, onClose }) {
   )
 }
 
-function Clippings({ session, book }) {
-  const [items, error, reload] = useLoad(() => api.clippings(session, book.document), [session, book.document], `clips:${book.document}`)
+function Clippings({ session, book, revision = 0 }) {
+  const [items, error, reload] = useLoad(() => api.clippings(session, book.document), [session, book.document, revision], `clips:${book.document}`)
   const [sharing, setSharing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   if (error) return <ErrorNote error={error} />
@@ -210,10 +213,10 @@ function Clippings({ session, book }) {
         const heading = c.chapter && c.chapter !== chapter ? (chapter = c.chapter) : null
         return (
           <div key={c.id}>
-            {heading && <p className="mt-5 mb-2 font-mono text-[0.65rem] font-medium tracking-wider text-stone-400 uppercase">{heading}</p>}
-            <Card className="group relative p-4 select-none [-webkit-touch-callout:none] md:select-text" {...hold(() => setDeleting(c))}>
+            {heading && <p className="mt-5 mb-2 text-sm font-medium text-stone-500">{heading}</p>}
+            <article className="group relative border-b border-stone-200 py-5 pr-8 select-none [-webkit-touch-callout:none]" {...hold(() => setDeleting(c))}>
               <ClipMenu onDelete={() => setDeleting(c)} />
-              <blockquote className="border-l-2 border-brand-300 pl-3 font-display text-[0.95rem]/relaxed text-stone-800 italic">
+              <blockquote className="font-display text-lg/relaxed text-stone-800">
                 {c.text}
               </blockquote>
               {c.note && <p className="mt-3 font-hand text-lg/6 text-brand-700">{c.note}</p>}
@@ -223,11 +226,11 @@ function Clippings({ session, book }) {
                   className="-ml-2 flex h-9 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-brand-600 active:bg-stone-100"
                   aria-label="Share clipping"
                 >
-                  <Share2 className="size-4" /> Share
+                  <ShareIcon className="size-4" /> Share
                 </button>
-                <p className="font-mono text-[0.65rem] text-stone-400">{date(c.created_at)}</p>
+                <p className="text-xs text-stone-500">{date(c.created_at)}</p>
               </div>
-            </Card>
+            </article>
           </div>
         )
       })}
@@ -248,26 +251,12 @@ function Clippings({ session, book }) {
   )
 }
 
-const norm = (s) => (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+// Letters, marks and digits of every script: an ASCII-only pattern reduces Japanese titles to their
+// digits, and dropping marks merges Thai or Hindi words that differ only in a tone or vowel sign.
+const norm = (s) => (s ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim()
 // Same normalized title (and author when both have one): probably the same book synced twice.
 export const looksLikeSame = (a, b) =>
   a.document !== b.document && norm(a.title) && norm(a.title) === norm(b.title) && (!a.author || !b.author || norm(a.author) === norm(b.author))
-
-function Sheet({ title, onClose, children }) {
-  return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center md:items-center">
-      <div className="absolute inset-0 bg-stone-950/40" onClick={onClose} />
-      <div className="relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-lg md:rounded-[28px] md:p-6">
-        <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-stone-300 md:hidden" />
-        <button onClick={onClose} className="absolute top-3 right-3 grid size-10 place-items-center rounded-full text-stone-500 active:bg-stone-200" aria-label="Close">
-          <X className="size-5" />
-        </button>
-        <h2 className="pr-10 font-display text-xl font-semibold text-stone-900">{title}</h2>
-        {children}
-      </div>
-    </div>
-  )
-}
 
 const field =
   'h-11 w-full rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
@@ -336,24 +325,25 @@ function CoverPicker({ session, book, onDone, onClose }) {
 }
 
 function MergePicker({ session, book, books, onDone, onClose }) {
-  const [busy, setBusy] = useState(null)
-  const [err, setErr] = useState(null)
+  const [selected, setSelected] = useState(null)
   const [stats, setStats] = useState(true)
+  // Syncs with no title or filename (e.g. KOReader on a binary hash) are hidden from
+  // the library; list them here, newest first, so they can be folded into the real book.
+  const [untitled] = useLoad(() => api.untitledBooks(session).catch(() => []), [session], 'untitled books')
   const others = books
     .filter((b) => b.document !== book.document)
     .sort((a, b) => Number(looksLikeSame(book, b)) - Number(looksLikeSame(book, a)) || (a.title ?? '').localeCompare(b.title ?? ''))
-  async function merge(other) {
-    const what = stats ? 'progress, clippings and reading stats' : 'progress and clippings'
-    if (!confirm(`Merge "${other.title || other.filename}" into this book? Its ${what} move here, and future syncs of it land here too.`)) return
-    setBusy(other.document)
-    setErr(null)
-    try {
-      await api.merge(session, other.document, book.document, stats)
-      onDone()
-    } catch (e) {
-      setErr(e.message)
-      setBusy(null)
-    }
+    .concat([...(untitled ?? [])].sort((a, b) => b.timestamp - a.timestamp))
+  if (selected) {
+    const what = selected.stats ? 'progress, clippings and reading stats' : 'progress and clippings'
+    return (
+      <ActionSheet title={`Merge "${selected.book.title || selected.book.filename || 'Untitled book'}" into this book?`} actionLabel="Merge" pendingLabel="Merging…" onClose={() => setSelected(null)} onConfirm={async () => {
+        await api.merge(session, selected.book.document, book.document, selected.stats)
+        onDone()
+      }}>
+        Its {what} move here, and future syncs of it land here too.
+      </ActionSheet>
+    )
   }
   return (
     <Sheet title="Merge a duplicate into this book" onClose={onClose}>
@@ -364,22 +354,17 @@ function MergePicker({ session, book, books, onDone, onClose }) {
         <input type="checkbox" checked={stats} onChange={(e) => setStats(e.target.checked)} className="size-4 accent-brand-500" />
         Combine reading stats (time, pages, sessions)
       </label>
-      {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
       <Card className="mt-4 divide-y divide-stone-100">
         {others.map((b) => (
-          <button key={b.document} disabled={busy !== null} onClick={() => merge(b)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-stone-50">
+          <button key={b.document} onClick={() => setSelected({ book: b, stats })} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-stone-50">
             <Cover session={session} book={b} small className="w-9" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename}</p>
+              <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename || 'Untitled book'}</p>
               <p className="truncate text-xs text-stone-500">
-                {[b.author, pct(b.percentage), b.device].filter(Boolean).join(' · ')}
+                {[b.author, pct(b.percentage), b.device, !b.title && !b.filename && b.timestamp && `synced ${ago(b.timestamp)}`].filter(Boolean).join(' · ')}
               </p>
             </div>
-            {busy === b.document ? (
-              <Loader2 className="size-4 animate-spin text-brand-500" />
-            ) : (
-              looksLikeSame(book, b) && <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">Likely duplicate</span>
-            )}
+            {looksLikeSame(book, b) && <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">Likely duplicate</span>}
           </button>
         ))}
       </Card>
@@ -513,7 +498,9 @@ function DetailsSheet({ session, book, onDone, onClose }) {
 }
 
 function BookMenu({ session, book, books, activity, onChange }) {
+  const [action, setAction] = useState(null)
   const [menu, setMenu] = useState(false)
+  useNativeButton('more', { sfSymbol: 'ellipsis', anchor: 'topTrailing' }, () => setMenu((m) => !m))
   const [open, setOpen] = useState(null) // 'cover' | 'details' | 'pages' | 'dates' | 'merge'
   const [pages, setPages] = useState(book.page_count ?? '')
   const [saving, setSaving] = useState(false)
@@ -532,21 +519,6 @@ function BookMenu({ session, book, books, activity, onChange }) {
       done()
     } finally {
       setSaving(false)
-    }
-  }
-  async function separate() {
-    if (!confirm('Separate the merged copies again? Future syncs from them will show as their own books.')) return
-    for (const alias of book.aliases) await api.unmerge(session, alias)
-    onChange()
-  }
-  async function remove() {
-    if (!confirm(`Remove "${book.title || 'this book'}" from your library? Its progress, clippings and stats are deleted. A reader that still has it will sync it again.`)) return
-    try {
-      await api.removeBook(session, book.document)
-      location.hash = '#/'
-      onChange()
-    } catch (e) {
-      notify({ error: true, title: "Couldn't remove the book", detail: e.message })
     }
   }
   const item = (Icon, label, run, extra = null, danger = false) => (
@@ -572,14 +544,14 @@ function BookMenu({ session, book, books, activity, onChange }) {
         aria-haspopup="menu"
         aria-expanded={menu}
         onClick={() => setMenu(!menu)}
-        className="grid size-11 place-items-center rounded-full text-stone-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
+        className="native-hide grid size-11 place-items-center rounded-full text-stone-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
       >
         <MoreHorizontal className="size-6" />
       </button>
       {menu && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
-          <div role="menu" className="absolute top-12 right-0 z-30 w-64 divide-y divide-stone-100 overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-stone-950/10">
+          <div role="menu" className="native-menu absolute top-12 right-0 z-30 w-64 divide-y divide-stone-100 overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-stone-950/10">
             {item(PenLine, 'Edit title & author', () => setOpen('details'))}
             {item(ImageIcon, 'Change cover', () => setOpen('cover'))}
             {item(CalendarDays, 'Reading dates', () => setOpen('dates'))}
@@ -591,10 +563,36 @@ function BookMenu({ session, book, books, activity, onChange }) {
               dupes > 0 && <span className="ml-auto rounded-full bg-brand-50 px-2 py-0.5 text-[0.65rem] font-semibold text-brand-700">{dupes} likely</span>
             )}
             {book.aliases?.length > 0 &&
-              item(Split, book.aliases.length === 1 ? 'Separate merged copy' : `Separate ${book.aliases.length} merged copies`, separate)}
-            {item(Trash2, 'Remove from library', remove, null, true)}
+              item(Split, book.aliases.length === 1 ? 'Separate merged copy' : `Separate ${book.aliases.length} merged copies`, () => setAction({ kind: 'separate', aliases: [...book.aliases] }))}
+            {item(Trash2, 'Remove from library', () => setAction({ kind: 'remove', document: book.document, title: book.title }), null, true)}
           </div>
         </>
+      )}
+      {action && (
+        <ActionSheet
+          title={action.kind === 'separate' ? 'Separate merged copies?' : `Remove "${action.title || 'this book'}" from your library?`}
+          actionLabel={action.kind === 'separate' ? 'Separate' : 'Remove'}
+          pendingLabel={action.kind === 'separate' ? 'Separating…' : 'Removing…'}
+          danger={action.kind === 'remove'}
+          onClose={() => setAction(null)}
+          onConfirm={async () => {
+            if (action.kind === 'separate') {
+              for (const alias of action.aliases) {
+                await api.unmerge(session, alias)
+                // Retry only the remaining copies if a later request fails.
+                setAction((current) => ({ ...current, aliases: current.aliases.filter((id) => id !== alias) }))
+              }
+            } else {
+              await api.removeBook(session, action.document)
+              location.hash = '#/'
+            }
+            onChange()
+          }}
+        >
+          {action.kind === 'separate'
+            ? 'Future syncs from the separated copies will show as their own books.'
+            : 'Its progress, clippings and stats are deleted. A reader that still has it will sync it again.'}
+        </ActionSheet>
       )}
       {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'dates' && <DatesSheet session={session} book={book} activity={activity} onDone={done} onClose={() => setOpen(null)} />}
@@ -659,11 +657,30 @@ function Details({ book }) {
 // The book's description (from Hardcover), clamped with Read more when it's long.
 // Beyond this book: the next one in its series, and where this one syncs to
 // (its match at each linked service, fixable in place).
-function Services({ session, book }) {
+function Services({ session, book, onSync }) {
   const done = book.status === 'finished' || book.percentage >= 0.9
   const [series] = useLoad(() => (book.series && done ? api.next(session, book.document) : Promise.resolve(null)), [book.document, done], `next ${book.document}`)
   const [data, , reload] = useLoad(() => api.bookMatches(session, book.document), [book.document], `matches ${book.document}`)
   const [picking, setPicking] = useState(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState(null)
+  const [syncResult, setSyncResult] = useState(null)
+  async function sync(m) {
+    setSyncing(m.id)
+    setSyncError(null)
+    setSyncResult(null)
+    try {
+      const result = await api.syncBook(session, m.id, book.document)
+      setSyncResult({ id: m.id, text: result.history_pending ? 'Progress and clippings updated. More history remains; sync again to continue.' :
+        result.queued ? (m.sync.read ? `Updated from ${m.name}. Outgoing updates queued.` : 'Outgoing updates queued.') :
+        m.sync.read ? `Updated from ${m.name}.` : 'No updates to send.' })
+      onSync()
+    } catch (err) {
+      setSyncError({ id: m.id, text: err.message || 'Couldn’t sync this book. Try again.' })
+    } finally {
+      setSyncing(false)
+    }
+  }
   if (!series?.next && !data?.length) return null
   return (
     <Card className="mt-4 divide-y divide-stone-100">
@@ -678,18 +695,30 @@ function Services({ session, book }) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-stone-900">{m.name}</p>
                   <p className={`truncate text-xs ${m.matched ? 'text-stone-500' : m.source === 'manual' ? 'text-stone-500' : 'text-amber-700'}`}>
-                    {m.matched ? (m.source === 'manual' ? 'Matched by you' : 'Matched') : m.source === 'manual' ? 'Not syncing' : 'Not matched'}
+                    {m.matched ? (m.match_by === 'document' ? 'Linked by document' : m.source === 'manual' ? 'Matched by you' : 'Matched') : m.source === 'manual' ? 'Not syncing' : 'Not matched'}
                   </p>
                 </div>
-                <button
+                {m.match_by !== 'document' && <button
                   type="button"
                   onClick={() => setPicking(picking === m.id ? null : m.id)}
                   className="h-8 shrink-0 rounded-full px-3 text-sm font-semibold text-brand-600 ring-1 ring-brand-200 active:bg-brand-50"
                 >
                   {picking === m.id ? 'Cancel' : m.matched ? 'Change' : 'Match'}
-                </button>
+                </button>}
               </div>
               {m.push_note && <p className="mt-1 text-xs text-amber-700">{m.push_note}</p>}
+              {m.matched && m.sync?.enabled && (m.sync.read || m.sync.write) && (
+                <div className="mt-3">
+                  <button type="button" disabled={!!syncing} onClick={() => sync(m)}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-full px-4 text-sm font-semibold text-brand-600 ring-1 ring-brand-200 disabled:opacity-60">
+                    {syncing === m.id && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}
+                    {syncing === m.id ? 'Syncing…' : 'Sync now'}
+                  </button>
+                  <p className="mt-2 text-xs text-stone-500">{m.sync.read ? (m.sync.write ? 'Pulls this book’s latest data, then queues outgoing updates.' : 'Pulls this book’s latest updates.') : 'Queues this book’s updates for this service.'}</p>
+                  {syncResult?.id === m.id && <p role="status" className="mt-2 text-xs text-stone-600">{syncResult.text}</p>}
+                  {syncError?.id === m.id && <p role="alert" className="mt-2 text-xs text-red-700">{syncError.text}</p>}
+                </div>
+              )}
               {picking === m.id && (
                 <Picker
                   session={session}
@@ -778,13 +807,16 @@ const seriesLabel = (b) =>
 
 export default function Book({ session, book, books, activity, back = { href: '#/', label: 'Library' }, onChange }) {
   const wide = useWide()
+  const [revision, setRevision] = useState(0)
+  const synced = () => { setRevision((n) => n + 1); onChange() }
+  useNativeBack(back.href)
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
-    <div className="px-4 pt-4 pb-6 md:px-8 md:pt-6 lg:px-12">
-      <div className="-mr-2 flex h-11 items-center">
+    <div className="px-4 pt-6 pb-6 md:px-8 md:pt-6 lg:px-12">
+      <div className="-mr-2 mb-6 flex h-11 items-center md:mb-0">
         <a
           href={back.href}
-          className="-ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
+          className="native-hide -ml-2 flex h-11 items-center gap-1.5 rounded-full pr-4 pl-2 text-lg font-semibold text-brand-600 transition active:bg-stone-200/70 md:hover:bg-stone-100"
         >
           <ArrowLeft className="size-6" strokeWidth={2} /> {back.label}
         </a>
@@ -794,7 +826,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
       <div className="md:mt-4">
         <div>
           {/* Phone: cover beside the title, status buttons full width below. Wider: status sits under the title, beside the cover. */}
-          <div className="relative mt-3 grid grid-cols-[7rem_1fr] gap-x-4 md:mt-0 md:grid-cols-[11rem_1fr] md:grid-rows-[auto_1fr] md:gap-x-8 lg:grid-cols-[13rem_1fr]">
+          <div className="relative grid grid-cols-[7rem_1fr] gap-x-4 md:mt-0 md:grid-cols-[11rem_1fr] md:grid-rows-[auto_1fr] md:gap-x-8 lg:grid-cols-[13rem_1fr]">
             <Cover session={session} book={book} className="w-full md:row-span-2" />
             <div className="min-w-0 pt-1 md:pt-0">
               <h1 className="font-display text-2xl/tight font-semibold md:text-3xl/tight tracking-tight text-balance text-stone-900">
@@ -813,7 +845,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
                 <span className="font-semibold text-brand-600">{pct(book.percentage)}</span> · {book.device || book.device_id} · {ago(book.timestamp)}
               </p>
               <ProgressBar value={book.percentage} className="mt-2" />
-              {wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} wide />}
+              {wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} wide revision={revision} />}
             </div>
             <div className="col-span-2 mt-6 md:col-span-1 md:col-start-2 md:self-end">
               <StatusPicker session={session} book={book} onChange={onChange} />
@@ -823,15 +855,15 @@ export default function Book({ session, book, books, activity, back = { href: '#
           {/* Cards flow two-up; spacing moves to the bottom so a column break can't eat a top margin. */}
           <div className="md:mt-4 md:columns-2 md:gap-4 md:[&>*]:mt-0 md:[&>*]:mb-4 [&>*]:break-inside-avoid">
             <Details book={book} />
-            {!wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} />}
+            {!wide && <Stats session={session} doc={book.document} aliases={book.aliases} activity={activity} revision={revision} />}
             <SpotifyCard session={session} book={book} onChange={onChange} />
-            <Services session={session} book={book} />
+            <Services key={book.document} session={session} book={book} onSync={synced} />
           </div>
         </div>
 
         <section>
           <h2 className="mt-8 mb-3 font-display text-xl font-semibold text-stone-900 md:mt-6 md:text-2xl">Clippings</h2>
-          <Clippings session={session} book={book} />
+          <Clippings session={session} book={book} revision={revision} />
         </section>
       </div>
     </div>

@@ -61,6 +61,12 @@ describe('covers, page counts and activity', () => {
     const act = await (await app.request('/api/v1/stats/activity', { headers })).json();
     expect(act.books[0]).toMatchObject({ document: DOC, page_count: 500, pages_read: 250, finished_at: null });
     expect(act.days.reduce((n: number, d: { pages: number }) => n + d.pages, 0)).toBe(107); // (0.5 - 0.2853) * 500
+
+    // Another user with the same book reuses the lookup: no new requests.
+    const other = await registerUser(app, 'reader2');
+    await app.request('/syncs/progress', { method: 'PUT', headers: other.headers, body: JSON.stringify(PUT_BODY) });
+    expect(await (await app.request(`/api/v1/documents/${DOC}/cover`, { headers: other.headers })).json()).toEqual(want);
+    expect(calls).toHaveLength(2);
   });
 });
 
@@ -91,6 +97,16 @@ describe('Amazon page count fallback (SearchAPI)', () => {
     calls.length = 0;
     expect((await findBookInfo(http, 'From Below', 'Darcy Coates', {})).pages).toBeNull();
     expect(calls.some((u) => u.includes('searchapi'))).toBe(false);
+  });
+
+  it('retries Open Library without a series prefix', async () => {
+    const { findBookInfo } = await import('../src/models/cover.js');
+    const http: HttpTransport = async (url) => {
+      if (url.includes('itunes')) return json({ results: [] });
+      const title = new URL(url).searchParams.get('title');
+      return json({ docs: title === 'The Long Game' ? [{ title: 'The Long Game', author_name: ['Rachel Reid'], number_of_pages_median: 448 }] : [] });
+    };
+    expect((await findBookInfo(http, 'Game Changers 6: The Long Game', 'Rachel Reid', {})).pages).toBe(448);
   });
 });
 

@@ -383,3 +383,13 @@ describe('reading grids', () => {
     expect(cls('Mon, Sep 28')).toContain('bg-brand-500')
   })
 })
+
+describe('BookOrbit stats', () => {
+  it('explains exact duplicate exclusions without implying that device history is dropped', () => {
+    const props = { session: {}, books: [], activity, summary: { devices: [], bookorbit: { excluded_sessions: 2 } } }
+    const { getByText, queryByText, rerender } = render(<Stats {...props} />)
+    expect(getByText(/Duplicate BookOrbit session records are counted once/)).toBeTruthy()
+    rerender(<Stats {...props} summary={{ devices: [], bookorbit: { excluded_sessions: 0 } }} />)
+    expect(queryByText(/Duplicate BookOrbit session records are counted once/)).toBeNull()
+  })
+})

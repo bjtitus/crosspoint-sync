@@ -25,11 +25,11 @@ describe('Library completion updates', () => {
     expect(getByText('day streak').previousElementSibling.textContent).toBe('1')
   })
 
-  it('replaces the Continue reading book when its finished status arrives', () => {
-    const { container, getByRole, getByText, rerender } = render(
+  it('shows every in-progress book as a reading card and removes completed books', () => {
+    const { container, getByRole, getByText, getAllByText, rerender } = render(
       <Library session={session} books={[{ ...finished, status: 'reading' }, reading]} />,
     )
-    expect(getByText('Continue reading').closest('a').getAttribute('href')).toBe('#/book/finished')
+    expect(getAllByText('Continue reading').map((label) => label.closest('a').getAttribute('href'))).toEqual(['#/book/finished', '#/book/reading'])
 
     rerender(<Library session={session} books={[finished, reading]} />)
     expect(getByText('Continue reading').closest('a').getAttribute('href')).toBe('#/book/reading')
@@ -44,5 +44,30 @@ describe('Library completion updates', () => {
     const { getByText, queryByText } = render(<Library session={session} books={[finished]} />)
     expect(getByText('Nothing in progress')).toBeTruthy()
     expect(queryByText('Continue reading')).toBeNull()
+  })
+})
+
+describe('duplicate notice', () => {
+  const book = (document, title) => ({ document, title, author: 'Unknown Author', status: 'finished', percentage: 1 })
+
+  it('tells different Japanese titles apart', () => {
+    const books = [
+      book('grammar', '小学1年生 言葉と文法にぐーんと強くなる (くもんの国語集中学習)'),
+      book('kanji', '小学1年生 漢字にぐーんと強くなる (くもんの国語集中学習)'),
+    ]
+    const { container } = render(<Library session={session} books={books} />)
+    expect(container.textContent).not.toContain('appears more than once')
+  })
+
+  it('tells Thai titles apart that differ only in a tone mark', () => {
+    const books = [book('forest', 'ป่า'), book('aunt', 'ป้า')]
+    const { container } = render(<Library session={session} books={books} />)
+    expect(container.textContent).not.toContain('appears more than once')
+  })
+
+  it('still finds a Japanese title synced twice, full-width forms included', () => {
+    const books = [book('a', '変な家２　～11の間取り図～'), book('b', '変な家2 ~11の間取り図~')]
+    const { container } = render(<Library session={session} books={books} />)
+    expect(container.textContent).toContain('appears more than once')
   })
 })

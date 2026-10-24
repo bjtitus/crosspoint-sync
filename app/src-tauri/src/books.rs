@@ -2,7 +2,6 @@
 //! Download naming and extension resolution follow common-stacks.
 
 use crate::opds::{self, feed::Feed, Auth};
-use crate::optimizer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -10,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::ipc::{Channel, InvokeBody, Request};
 use tauri::{AppHandle, Manager};
+use unicode_normalization::UnicodeNormalization;
 
 type Res<T> = Result<T, String>;
 fn err(e: impl std::fmt::Display) -> String {
@@ -37,7 +37,6 @@ pub struct Download {
 #[serde(tag = "stage", rename_all = "snake_case")]
 pub enum Progress {
   Downloading { done: u64, total: Option<u64> },
-  Optimizing { done: u64, total: u64 },
   Uploading,
 }
 
@@ -80,6 +79,11 @@ pub async fn opds_feed(url: String, auth: Option<Auth>) -> Res<Feed> {
 #[tauri::command]
 pub async fn opds_search(url: String, query: String, auth: Option<Auth>) -> Res<Feed> {
   opds::search(&auth.unwrap_or_default(), &url, &query).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn opds_image(url: String, auth: Option<Auth>) -> Res<String> {
+  opds::image(&auth.unwrap_or_default(), &url).await.map_err(err)
 }
 
 #[tauri::command]
@@ -156,20 +160,27 @@ pub fn delete_download(app: AppHandle, name: String) -> Res<()> {
   Ok(())
 }
 
-/// Send a downloaded book to the reader. `quality` set = optimize EPUB images first.
+/// Read a downloaded book for optimization in the WebView. Leave the saved original intact.
+#[tauri::command]
+pub async fn read_download(app: AppHandle, name: String) -> Res<tauri::ipc::Response> {
+  let name = safe_name(&name)?;
+  let bytes = fs::read(books_dir(&app)?.join(name)).map_err(err)?;
+  Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Send a downloaded book without optimization.
 #[tauri::command]
 pub async fn send_download(
   app: AppHandle,
   name: String,
   base: String,
   folder: String,
-  quality: Option<u8>,
   rename: Option<bool>,
   on_progress: Channel<Progress>,
 ) -> Res<String> {
   let name = safe_name(&name)?;
   let bytes = fs::read(books_dir(&app)?.join(&name)).map_err(err)?;
-  send(&base, &folder, &name, bytes, quality, rename.unwrap_or(false), Some(on_progress)).await
+  send(&base, &folder, &name, bytes, rename.unwrap_or(false), Some(on_progress)).await
 }
 
 /// Raw IPC body bytes. Android's WebView can't expose request bodies to the IPC
@@ -190,7 +201,7 @@ fn body_bytes(request: &Request<'_>) -> Res<Vec<u8>> {
 }
 
 /// Send a file picked in the webview. Body = raw bytes; x-name / x-base /
-/// x-folder / x-quality / x-rename headers carry the rest (raw IPC avoids JSON-encoding MBs).
+/// x-folder / x-rename headers carry the rest (raw IPC avoids JSON-encoding MBs).
 #[tauri::command]
 pub async fn send_bytes(request: Request<'_>) -> Res<String> {
   let header = |k: &str| request.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
@@ -198,10 +209,9 @@ pub async fn send_bytes(request: Request<'_>) -> Res<String> {
   let name = decode(header("x-name"))?;
   let base = decode(header("x-base"))?;
   let folder = decode(header("x-folder"))?;
-  let quality = header("x-quality").and_then(|q| q.parse().ok());
   let bytes = body_bytes(&request)?;
   let rename = header("x-rename").is_some_and(|v| v == "1");
-  send(&base, &folder, &name, bytes, quality, rename, None).await
+  send(&base, &folder, &name, bytes, rename, None).await
 }
 
 /// Save a generated file (share card PNG, clippings Markdown) to Downloads.
@@ -247,12 +257,21 @@ fn save_to_photos(bytes: &[u8]) -> Res<()> {
   Ok(())
 }
 
+fn upload_filename(name: &str, bytes: &[u8], rename: bool) -> String {
+  let metadata_name = if rename && name.to_ascii_lowercase().ends_with(".epub") {
+    crate::epub_name::metadata_filename(bytes)
+  } else {
+    None
+  };
+  // Match the reader's web uploader, including original-name and metadata fallback paths.
+  metadata_name.as_deref().unwrap_or(name).nfc().collect()
+}
+
 async fn send(
   base: &str,
   folder: &str,
   name: &str,
   bytes: Vec<u8>,
-  quality: Option<u8>,
   rename: bool,
   progress: Option<Channel<Progress>>,
 ) -> Res<String> {
@@ -261,32 +280,8 @@ async fn send(
       let _ = ch.send(p);
     }
   };
-  let is_epub = name.to_ascii_lowercase().ends_with(".epub");
-  // "Rename from Book Metadata", like the reader's own upload page. Read from the
-  // original bytes, before the optimizer rewrites the archive.
-  let name = match rename && is_epub {
-    true => crate::epub_name::metadata_filename(&bytes).unwrap_or_else(|| name.to_string()),
-    false => name.to_string(),
-  };
+  let name = upload_filename(name, &bytes, rename);
   let name = name.as_str();
-  let bytes = match quality {
-    Some(q) if is_epub => {
-      let ch = progress.clone();
-      tauri::async_runtime::spawn_blocking(move || {
-        optimizer::optimize(&bytes, q.clamp(1, 100), &|done, total| {
-          if let Some(ch) = &ch {
-            let _ = ch.send(Progress::Optimizing { done, total });
-          }
-        })
-        // A book the optimizer can't parse still goes over as-is.
-        .unwrap_or(bytes)
-      })
-      .await
-      .map_err(err)?
-    }
-    _ => bytes,
-  };
-
   emit(Progress::Uploading);
   let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string()).mime_str(mime_for(name)).map_err(err)?;
   let url = format!("{}/upload?path={}", base.trim_end_matches('/'), urlencoding_encode(folder));
@@ -393,6 +388,22 @@ fn disposition_filename(cd: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn upload_names_are_nfc_with_or_without_metadata_renaming() {
+    for rename in [false, true] {
+      // Invalid/missing metadata falls back to the original name, still normalized.
+      for (input, expected) in [
+        ("Cafe\u{301}.epub", "Café.epub"),
+        ("\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}.EPUB", "한글.EPUB"),
+        ("Café.epub", "Café.epub"),
+        ("Dune.epub", "Dune.epub"),
+        ("① ﬁ.epub", "① ﬁ.epub"), // NFC must preserve compatibility characters.
+      ] {
+        assert_eq!(upload_filename(input, &[], rename), expected);
+      }
+    }
+  }
 
   #[test]
   fn resolves_extensions_and_names() {

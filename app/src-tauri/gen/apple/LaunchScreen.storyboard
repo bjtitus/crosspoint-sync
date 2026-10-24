@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Launch screen: the app icon centered on the app's paper background (#FAFAF9), matching Android's splash. -->
+<!-- Launch screen: the icon's mark alone, centered on the icon green (#6D9681), matching Android's splash. -->
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="17150" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="Y6W-OH-hqX">
     <dependencies>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="17122"/>
@@ -15,15 +15,15 @@
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="SplashLogo" translatesAutoresizingMaskIntoConstraints="NO" id="Lgo-Im-001">
-                                <rect key="frame" x="159" y="400" width="96" height="96"/>
+                                <rect key="frame" x="135" y="368" width="144" height="160"/>
                                 <constraints>
-                                    <constraint firstAttribute="width" constant="96" id="Lgo-W-001"/>
-                                    <constraint firstAttribute="height" constant="96" id="Lgo-H-001"/>
+                                    <constraint firstAttribute="width" constant="144" id="Lgo-W-001"/>
+                                    <constraint firstAttribute="height" constant="160" id="Lgo-H-001"/>
                                 </constraints>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="vDu-zF-Fre"/>
-                        <color key="backgroundColor" red="0.98039215686274506" green="0.98039215686274506" blue="0.97647058823529409" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" red="0.42745098039215684" green="0.58823529411764708" blue="0.50588235294117645" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
                             <constraint firstItem="Lgo-Im-001" firstAttribute="centerX" secondItem="5EZ-qb-Rvc" secondAttribute="centerX" id="Lgo-X-001"/>
                             <constraint firstItem="Lgo-Im-001" firstAttribute="centerY" secondItem="5EZ-qb-Rvc" secondAttribute="centerY" id="Lgo-Y-001"/>
@@ -35,6 +35,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="SplashLogo" width="96" height="96"/>
+        <image name="SplashLogo" width="144" height="160"/>
     </resources>
 </document>

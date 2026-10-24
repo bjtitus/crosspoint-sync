@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Copy, Download, Share2, X } from 'lucide-react'
+import { Copy, Download, X } from 'lucide-react'
 import { PLATFORMS, canShareNatively, copyImage, postTo, saveImage, shareNatively } from './shareCard.js'
-import { Spinner } from './ui.jsx'
+import { ShareIcon, Spinner } from './ui.jsx'
+import { useSheet } from './tabbar.js'
 
 // Preview a generated share card, then share it natively, copy/save it, or post it
 // (desktop). Used for clippings and the stats card.
 export default function ShareSheet({ heading, meta, render, renderKey, onClose, children }) {
   const [card, setCard] = useState(null) // { blob, url }
   const [status, setStatus] = useState(null)
+  useSheet()
 
   useEffect(() => {
     let url
@@ -40,7 +42,7 @@ export default function ShareSheet({ heading, meta, render, renderKey, onClose, 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center md:items-center">
       <div className="absolute inset-0 bg-stone-950/40" onClick={onClose} />
-      <div className="relative max-h-[92dvh] w-full overflow-y-auto rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-md md:rounded-[28px] md:p-6">
+      <div className="relative max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-md md:rounded-[28px] md:p-6">
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-stone-300 md:hidden" />
         <button onClick={onClose} className="absolute top-3 right-3 grid size-10 place-items-center rounded-full text-stone-500 active:bg-stone-200" aria-label="Close">
           <X className="size-5" />
@@ -57,7 +59,7 @@ export default function ShareSheet({ heading, meta, render, renderKey, onClose, 
             onClick={() => act(() => shareNatively(card.blob, meta).then(() => null), () => null)}
             className="mt-5 flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 text-base font-semibold text-white shadow-sm active:scale-[0.98] disabled:opacity-60"
           >
-            <Share2 className="size-5" /> Share
+            <ShareIcon className="size-5" /> Share
           </button>
         )}
 

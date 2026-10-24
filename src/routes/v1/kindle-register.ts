@@ -7,7 +7,7 @@ import { fetchTransport } from '../../connectors/registry.js';
 import { upsertAccount } from '../../connectors/store.js';
 import { registerDevice } from '../../connectors/kindle-fiona.js';
 import type { HttpTransport } from '../../connectors/types.js';
-import { credentialRequestIsSecure } from './connectors.js';
+import { CREDENTIAL_HTTPS_REQUIRED, credentialRequestIsSecure } from './connectors.js';
 
 /**
  * OPTIONAL server-side Amazon device registration for the Kindle connector.
@@ -59,7 +59,7 @@ export function kindleRegisterRoutes(
 
   app.post('/connectors/kindle/register/begin', async (c) => {
     if (!credentialRequestIsSecure(c, trustProxy)) {
-      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+      return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
       return c.json({ code: 2003, message: 'Server has no TOKEN_ENC_KEY; connector storage disabled' }, 403);
@@ -112,7 +112,7 @@ export function kindleRegisterRoutes(
 
   app.post('/connectors/kindle/register/complete', async (c) => {
     if (!credentialRequestIsSecure(c, trustProxy)) {
-      return c.json({ code: 2003, message: 'Connector credentials require HTTPS' }, 400);
+      return c.json({ code: 2003, message: CREDENTIAL_HTTPS_REQUIRED }, 400);
     }
     if (!secretsEnabled()) {
       return c.json({ code: 2003, message: 'Server has no TOKEN_ENC_KEY; connector storage disabled' }, 403);

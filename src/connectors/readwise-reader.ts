@@ -1,3 +1,4 @@
+import { ConnectorOperationError } from './types.js';
 import { decideMatch, extractTitleAuthor, type Candidate } from './matching.js';
 import type {
   Connector,
@@ -182,13 +183,13 @@ async function pullProgress(
   sinceMs: number
 ): Promise<InboundChange | null> {
   const token = tokenOf(cred);
-  if (rateLimited(token)) return null;
+  if (rateLimited(token)) throw new ConnectorOperationError('Readwise Reader is rate limited; try again later', true);
   const res = await http(
     `${BASE}/list/?id=${encodeURIComponent(match.externalId)}&withHtmlContent=false`,
     { method: 'GET', headers: authHeaders(token) }
   );
   noteRateLimit(token, res.status);
-  if (res.status !== 200) return null;
+  if (res.status !== 200) throw new ConnectorOperationError(`Readwise Reader request failed (${res.status})`, res.status === 429 || res.status >= 500, res.status === 401 || res.status === 403);
   const body = (await res.json()) as {
     results?: { reading_progress?: number; updated_at?: string }[];
   };

@@ -61,6 +61,7 @@
 		4D9B295417CA01F08FBEAF53 /* feed.rs */ = {isa = PBXFileReference; path = feed.rs; sourceTree = "<group>"; };
 		5B97ABE31780B7A6C5CAD74D /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		6A1455ECBA39E1ACC7E634A5 /* widget.rs */ = {isa = PBXFileReference; path = widget.rs; sourceTree = "<group>"; };
+		725351A937E063D1D025CF2A /* refresh.rs */ = {isa = PBXFileReference; path = refresh.rs; sourceTree = "<group>"; };
 		72ED45BA68D8C2F5A99C542D /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		75F208D74C3164B18C8AFAE5 /* mdns.rs */ = {isa = PBXFileReference; path = mdns.rs; sourceTree = "<group>"; };
 		7CC754790240CD99815BE1B6 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -129,6 +130,7 @@
 				4AE2C3E46EF866376181162A /* main.rs */,
 				75F208D74C3164B18C8AFAE5 /* mdns.rs */,
 				ED7B9C55E7A2791B84DE7114 /* optimizer.rs */,
+				725351A937E063D1D025CF2A /* refresh.rs */,
 				6A1455ECBA39E1ACC7E634A5 /* widget.rs */,
 				C1BB4D8BDB160ADDCC937AC4 /* opds */,
 			);
@@ -233,14 +235,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_0BF1C982-F44A-4BEA-B698-966E45BE2B97" /* x86_64 */ = {
+		"TEMP_7A0C2686-DC17-41D7-BBED-ECE13CB7ADC2" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = x86_64;
 			sourceTree = "<group>";
 		};
-		"TEMP_8A207812-13EC-45C6-BDD2-37FA145E419D" /* arm64 */ = {
+		"TEMP_E19E588B-C3F3-4881-B2F9-8074C8036D9C" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -299,6 +301,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					F1B6382EBA17716854185CF2 = {
+						DevelopmentTeam = 96247QW4R8;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = 6A0F362014CA38AA179565C4 /* Build configuration list for PBXProject "crosspoint-sync-app" */;
@@ -390,6 +396,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = CrossPointWidget/CrossPointWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 96247QW4R8;
 				INFOPLIST_FILE = CrossPointWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -410,6 +418,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = CrossPointWidget/CrossPointWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 96247QW4R8;
 				INFOPLIST_FILE = CrossPointWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -454,6 +464,7 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
+				DEVELOPMENT_TEAM = "96247QW4R8";
 			};
 			name = debug;
 		};
@@ -485,6 +496,7 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
+				DEVELOPMENT_TEAM = "96247QW4R8";
 			};
 			name = release;
 		};

@@ -97,6 +97,13 @@ export async function resolveMatch(
     match = await connector.createBook(cred, meta, ev, http);
   }
 
+  // Background history imports can still be matching when the user unlinks,
+  // replaces credentials, or picks a manual match. Discard the stale result.
+  const freshAccount = getAccount(db, userId, connectorId);
+  const freshMatch = getMatch(db, userId, connectorId, document);
+  if (!freshAccount?.enabled || freshAccount.cred_enc !== account.cred_enc ||
+      freshMatch?.source !== cached?.source || freshMatch?.external_id !== cached?.external_id ||
+      freshMatch?.external_edition !== cached?.external_edition || freshMatch?.updated_at !== cached?.updated_at) return null;
   saveMatch(db, userId, connectorId, document, match, match ? 'auto' : 'none');
   // A resolved match teaches us the book's title/author; keep it for future
   // metadata-less syncs and other connectors.

@@ -62,6 +62,13 @@ export function deleteDocumentData(db: DB, userId: number, document: string): nu
       .prepare('DELETE FROM document_aliases WHERE user_id = ? AND (alias = ? OR document = ?)')
       .run(userId, document, document);
     rows += Number(aliasResult.changes);
+    // Provider sessions are keyed by external book, shared by duplicate matches.
+    // Remove them only when no remaining document references that book.
+    const imported = db.prepare(`DELETE FROM bookorbit_stats_sync WHERE user_id = ? AND NOT EXISTS (
+      SELECT 1 FROM connector_matches m WHERE m.user_id = bookorbit_stats_sync.user_id
+      AND m.connector_id = 'bookorbit' AND m.external_id = bookorbit_stats_sync.external_id)`)
+      .run(userId);
+    rows += Number(imported.changes);
   });
   return rows;
 }

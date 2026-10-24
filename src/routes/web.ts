@@ -7,10 +7,7 @@ import type { AppEnv } from '../auth/middleware.js';
 import { SESSION_COOKIE, verifySession } from '../auth/session.js';
 import { extensionZip } from '../kindle-zip.js';
 import { HARDCOVER_NEW_KEY_URL, HARDCOVER_SCOPES } from '../connectors/hardcover.js';
-import { SERVER_URL_EXAMPLES } from '../connectors/server-url-examples.js';
 import { landingPage, metaTags } from './landing.js';
-
-const SERVER_URL_EXAMPLES_JS = JSON.stringify(SERVER_URL_EXAMPLES);
 
 /**
  * Minimal server-rendered web UI (no framework, no build step, no deps). Styled
@@ -28,7 +25,7 @@ const OG_IMAGE = fs.readFileSync(path.join(ASSETS_DIR, 'og.jpg'));
 // Service app icons, served at /icons/:id.png. Loaded once at boot; a missing
 // file just means no icon for that service (the UI falls back gracefully).
 const SERVICE_ICONS = new Map<string, Buffer>();
-for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'jellyfin', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'spotify', 'kindle']) {
+for (const id of ['kosync', 'hardcover', 'audiobookshelf', 'jellyfin', 'bookfusion', 'readwise', 'microblog', 'bookorbit', 'seekquel', 'spotify', 'kindle']) {
   try {
     SERVICE_ICONS.set(id, fs.readFileSync(path.join(ASSETS_DIR, 'icons', `${id}.png`)));
   } catch {
@@ -290,7 +287,10 @@ const LANDING = shell(
        <div class="desc">Sync reading progress with books on your Jellyfin server (12.0+).</div></div></div>
        <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/bookorbit.png" alt="" width="34" height="34"><div><div class="name">BookOrbit</div>
-       <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
+       <div class="desc">Keep your place in sync, both ways, with your own BookOrbit library. Import reading time and session history for matched books. Clippings show up as highlights, and finished books are marked Read.</div></div></div>
+       <span class="pill warn">beta</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="/icons/seekquel.png" alt="" width="34" height="34"><div><div class="name">Seekquel</div>
+       <div class="desc">Log your reading in Seekquel, a book tracker: where you are in each book, the books you finish, and your highlights.</div></div></div>
        <span class="pill warn">beta</span></div>
      <p style="font-family:'Caveat',cursive;font-weight:600;font-size:19px;color:var(--brand-600);margin:16px 0 0;transform:rotate(-1deg)">more on the way, and it's all open source</p>
    </div>
@@ -613,7 +613,8 @@ const HINTS = {
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   jellyfin: 'Sync reading progress with books in your Jellyfin library. Requires Jellyfin 12.0 or newer. Sign in with your Jellyfin username and password.',
-  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Books are matched by title and author, finishing a book marks it Read, and your clippings appear as highlights in the right spot. Sign in with your BookOrbit account.'
+  bookorbit: 'Sync reading progress both ways with your BookOrbit server. Import reading time and session history for matched books, including Kindle and other BookOrbit reader history alongside your device stats. Repeated sessions are counted once. Finishing a book marks it Read, and clippings appear as highlights. Sign in with your BookOrbit account.',
+  seekquel: 'Log your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You will approve the request in the Seekquel app.'
 };
 
 const TOKEN_HELP = {
@@ -672,12 +673,11 @@ function render(conn) {
       if (r.ok) done(); else $('e').textContent = r.data.message || 'Could not link';
     };
   } else if (conn.credential_kind === 'kosync' || conn.credential_kind === 'jellyfin') {
-    const srvPh = (${SERVER_URL_EXAMPLES_JS}[ID] || ${SERVER_URL_EXAMPLES_JS}.kosync);
-    const goLabel = ID === 'jellyfin' ? 'Connect Jellyfin' : 'Connect server';
+    const srvPh = { bookorbit: 'https://books.example.com', jellyfin: 'https://jellyfin.example.com' }[ID] || 'https://sync.koreader.rocks:443';
     f.innerHTML = '<label>Server URL</label><input id="srv" class="mono" placeholder="' + srvPh + '">'
       + '<div style="margin-top:10px"><label>Username</label><input id="u" autocomplete="off"></div>'
       + '<div style="margin-top:10px"><label>Password</label><input id="p" type="password" autocomplete="off"></div>'
-      + '<button class="primary full mt" id="go">' + goLabel + '</button><div class="err" id="e"></div>';
+      + '<button class="primary full mt" id="go">' + (ID === 'jellyfin' ? 'Connect Jellyfin' : 'Connect server') + '</button><div class="err" id="e"></div>';
     $('go').onclick = async () => {
       $('e').textContent = '';
       const r = await linkCredential({ server: $('srv').value.trim(), username: $('u').value.trim(), password: $('p').value });

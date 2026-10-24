@@ -188,6 +188,8 @@ export const cached = {
 export const api = {
   // Books a device synced without any metadata can't be shown meaningfully; hide them.
   books: (s) => call(s, '/api/v1/progress?limit=500').then(bookList),
+  // The hidden ones, so they can be merged into the book they really are.
+  untitledBooks: (s) => call(s, '/api/v1/progress?limit=500').then((r) => r.items.filter((b) => !b.title && !b.filename)),
   summary: (s) => call(s, '/api/v1/stats/summary'),
   // tz: minutes behind UTC, so the server buckets pages into local days.
   // Saved activity paints immediately via cached.activity, but a failed refresh
@@ -202,6 +204,7 @@ export const api = {
   linkConnector: (s, id, credential) => call(s, `/api/v1/connectors/${id}`, { method: 'PUT', body: JSON.stringify({ credential }) }),
   unlinkConnector: (s, id) => call(s, `/api/v1/connectors/${id}`, { method: 'DELETE' }),
   syncConnector: (s, id) => call(s, `/api/v1/connectors/${id}/sync`, { method: 'POST' }),
+  syncBook: (s, id, doc) => call(s, `/api/v1/connectors/${id}/sync/${doc}`, { method: 'POST' }),
   setConnectorOptions: (s, id, options) => call(s, `/api/v1/connectors/${id}/options`, { method: 'PUT', body: JSON.stringify(options) }),
   beginLink: (s, id) => call(s, `/api/v1/connectors/${id}/link/begin`, { method: 'POST' }),
   // Browser sign-in (OAuth): the server holds PKCE; the app finishes it only when its app link catches the redirect.

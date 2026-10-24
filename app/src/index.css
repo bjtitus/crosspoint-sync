@@ -81,6 +81,14 @@ html { color-scheme: light; }
 
 /* Paper grain — subtle fractal-noise texture, the recurring Free-Ink surface.
    Apply with a low opacity utility (e.g. opacity-[0.05]). */
+/* Screen height inside body's safe-area padding (plain dvh overflows by the insets on iOS). */
+@utility h-screen-safe {
+  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+@utility min-h-screen-safe {
+  min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+
 @utility paper-grain {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 160px 160px;
@@ -102,8 +110,48 @@ html { color-scheme: light; }
 body {
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
+
+/* Text entry still needs selection handles and copy/paste. */
+input, textarea, [contenteditable]:not([contenteditable="false"]) {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+img { -webkit-user-drag: none; }
+
+/* Status bar backdrop: pinned in the page colour so content scrolls (and rubber-bands)
+   under it, as in native apps, instead of the whole screen moving. Height is 0 where
+   there's no top inset (Android, desktop). Below sheets (z-40) so they still dim it. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top);
+  z-index: 35;
+  background: color-mix(in srgb, var(--color-stone-50) 85%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+/* iPhone: the glass buttons float over the page, so once it scrolls the strip grows
+   into iOS 26's scroll edge effect: solid behind the status bar, fading through a
+   soft blur to clear below the button row. Hidden at rest so it never veils titles. */
+.native-chrome body::before {
+  height: calc(env(safe-area-inset-top) + 4.5rem);
+  background: linear-gradient(
+    var(--color-stone-50) env(safe-area-inset-top),
+    color-mix(in srgb, var(--color-stone-50) 75%, transparent) calc(env(safe-area-inset-top) + 2rem),
+    transparent
+  );
+  -webkit-mask-image: linear-gradient(black 55%, transparent);
+  mask-image: linear-gradient(black 55%, transparent);
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+.native-chrome.scrolled body::before { opacity: 1; }
 
 /* Toast entrance: rise and fade in. */
 @keyframes toast-in {
@@ -134,3 +182,14 @@ body {
   .cp-loader { animation: cp-pulse 1.6s ease-in-out infinite; }
   @keyframes cp-pulse { 50% { opacity: 0.45; } }
 }
+
+/* iPhone app: native glass buttons replace these (tabbar.js). Hidden, not removed,
+   so the rows they sat in keep their height. */
+.native-chrome .native-hide { visibility: hidden; }
+/* Native buttons add a 16px plugin margin to tabbar.js's dx=12 / dy=8. */
+@media (width < 48rem) {
+  .native-chrome .settings-page { padding-top: 24px; }
+  .native-chrome .settings-header { padding-left: 12px; }
+}
+/* The ⋯ menu drops from its pinned native button, wherever the page has scrolled. */
+.native-chrome .native-menu { position: fixed; top: calc(env(safe-area-inset-top) + 3.75rem); right: 0.75rem; }

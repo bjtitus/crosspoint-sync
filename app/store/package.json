@@ -1,0 +1,11 @@
+{
+  "name": "crosspoint-sync-store-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "node make-assets.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0"
+  }
+}

@@ -5,7 +5,7 @@ import type { DB } from '../db/db.js';
 import type { Config } from '../config.js';
 import type { AppEnv } from '../auth/middleware.js';
 import { hashKey, verifyKey } from '../auth/password.js';
-import { rateLimiter } from '../auth/middleware.js';
+import { rateLimiter, USERS_BY_NAME_SQL } from '../auth/middleware.js';
 import {
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
@@ -120,9 +120,9 @@ export function authRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!username || !password) {
       return c.json({ error: 'Username and password required' }, 400);
     }
-    const byName = db.prepare('SELECT id, account_id, key_hash FROM users WHERE username = ?');
-    const row = (byName.get(username) ?? byName.get(username.toLowerCase())) as { id: number; account_id: number | null; key_hash: string } | undefined;
-    if (!row || !verifyKey(md5(password), row.key_hash)) {
+    const rows = db.prepare(USERS_BY_NAME_SQL).all(username, username) as { id: number; account_id: number | null; key_hash: string }[];
+    const row = rows.find((r) => verifyKey(md5(password!), r.key_hash));
+    if (!row) {
       return c.json({ error: 'Invalid sync account credentials' }, 401);
     }
     let accountId = row.account_id;

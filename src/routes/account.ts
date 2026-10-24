@@ -5,7 +5,7 @@ import { withTransaction, type DB } from '../db/db.js';
 import type { Config } from '../config.js';
 import { masterAuth, type AppEnv } from '../auth/middleware.js';
 import { hashKey, verifyKey } from '../auth/password.js';
-import { invalidateAuthCache } from '../auth/middleware.js';
+import { invalidateAuthCache, USERS_BY_NAME_SQL } from '../auth/middleware.js';
 import { SESSION_COOKIE } from '../auth/session.js';
 import { nowSeconds } from '../models/sync.js';
 import { USERNAME_RE } from './kosync.js';
@@ -14,6 +14,9 @@ import { USERNAME_RE } from './kosync.js';
 export function deleteKosyncUserData(db: DB, userId: number, username: string, { keepUser = false } = {}): void {
   withTransaction(db, () => {
     for (const table of [
+      'bookorbit_session_exports',
+      'bookorbit_session_destination',
+      'reading_sessions',
       'connector_queue',
       'epub_maps',
       'connector_matches',
@@ -88,7 +91,7 @@ export function accountRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!password || password.length < 1 || password.length > 256) {
       return c.json({ error: 'Invalid password' }, 400);
     }
-    if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) {
+    if (db.prepare('SELECT 1 FROM users WHERE lower(username) = ?').get(username)) {
       return c.json({ error: 'That sync username is taken' }, 409);
     }
     db.prepare(
@@ -115,10 +118,10 @@ export function accountRoutes(db: DB, config: Config): Hono<AppEnv> {
     if (!username || !password) {
       return c.json({ error: 'Username and password required' }, 400);
     }
-    const byName = db.prepare('SELECT id, key_hash, account_id FROM users WHERE username = ?');
-    const row = (byName.get(username) ?? byName.get(username.toLowerCase())) as { id: number; key_hash: string; account_id: number | null } | undefined;
+    const rows = db.prepare(USERS_BY_NAME_SQL).all(username, username) as { id: number; key_hash: string; account_id: number | null }[];
     // The device sends MD5(password); the web form takes the plain password.
-    if (!row || !verifyKey(md5(password), row.key_hash)) {
+    const row = rows.find((r) => verifyKey(md5(password!), r.key_hash));
+    if (!row) {
       return c.json({ error: 'Invalid sync account credentials' }, 401);
     }
     if (row.account_id && row.account_id !== account.id) {
