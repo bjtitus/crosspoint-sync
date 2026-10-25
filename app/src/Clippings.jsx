@@ -28,8 +28,8 @@ function markdown(groups) {
 function Clip({ session, clip, book, onShare, onDelete, showBook }) {
   return (
     <article className={`group relative select-none [-webkit-touch-callout:none] ${showBook
-      ? 'border-b border-stone-200 pt-6 pb-4 pr-8'
-      : 'border-b border-stone-200 py-5 pr-8'}`} {...hold(() => onDelete(clip))}>
+      ? 'border-b border-stone-200 pt-6 pb-4 md:pr-8'
+      : 'border-b border-stone-200 py-5 md:pr-8'}`} {...hold(() => onDelete(clip))}>
       <ClipMenu onDelete={() => onDelete(clip)} />
       <blockquote className="font-display text-lg/relaxed text-stone-800">{clip.text}</blockquote>
       {clip.note && <p className="mt-3 font-hand text-lg/6 text-brand-700">{clip.note}</p>}
@@ -174,7 +174,7 @@ export default function Clippings({ session, books }) {
                   <p className="truncate text-sm text-stone-500">{book.author}</p>
                 </div>
               </a>
-              <div className="mt-3 grid gap-x-8 md:grid-cols-2">
+              <div className="mt-3 grid grid-cols-1 gap-x-8 md:grid-cols-2">
                 {clips.map((c) => (
                   <Clip key={c.id} session={session} clip={c} book={book} onShare={setSharing} onDelete={setDeleting} />
                 ))}
