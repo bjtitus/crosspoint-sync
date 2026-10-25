@@ -60,7 +60,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       rows.push({
         document: o.document,
         // The fields progress metadata takes; `author` is still read for older clients.
-        meta: parseMetadata({ ...o, authors: o.authors ?? o.author }),
+        meta: parseMetadata({ ...o, authors: typeof o.authors === 'string' && o.authors ? o.authors : o.author }),
         filesize:
           typeof o.filesize === 'number' && Number.isInteger(o.filesize) && o.filesize >= 0 ? o.filesize : null,
       });

@@ -15,7 +15,8 @@ describe('PUT /api/v1/documents', () => {
     const res = await put([
       { document: A, title: 'Kokoro', authors: 'Natsume Soseki', language: 'ja', filename: 'kokoro.epub',
         filesize: 1234, bookfusion_id: '36835' },
-      { document: B, title: 'Der Zauberberg', author: 'Thomas Mann' }, // older clients' `author`
+      // Older clients' `author`, also when `authors` comes in a shape it isn't read from.
+      { document: B, title: 'Der Zauberberg', authors: ['Thomas Mann'], author: 'Thomas Mann' },
     ]);
     expect(await res.json()).toMatchObject({ accepted: 2 });
     const row = (doc: string) =>
