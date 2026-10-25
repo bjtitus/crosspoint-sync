@@ -367,11 +367,15 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
 
   // Every book's stats, a page at a time, for clients that restore or show them all: one item per
   // device and book, with the book's metadata so a client can match it to a file without the hash.
-  // `device_id` keeps one device's; `cursor` is the previous page's `next`.
+  // `device_id` keeps one device's; `cursor` is the previous page's `next`; `since` (a previous answer's
+  // `until`) keeps the books uploaded since then.
   app.get('/stats/books', (c) => {
     const user = c.get('user');
     // An empty device_id means no filter, not a device called "".
     const deviceId = c.req.query('device_id') || undefined;
+    const sinceRaw = Number(c.req.query('since') ?? 0);
+    const since = Number.isSafeInteger(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0;
+    const now = nowSeconds();
     const cursor = c.req.query('cursor') ?? '';
     const limitRaw = Number(c.req.query('limit') ?? DEFAULT_BOOK_PAGE);
     const limit = Number.isInteger(limitRaw) && limitRaw >= 1 ? Math.min(limitRaw, MAX_BOOK_PAGE) : DEFAULT_BOOK_PAGE;
@@ -383,11 +387,11 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         `SELECT s.device_id, s.document, s.payload, s.updated_at, d.title, d.author, d.filename, d.language
          FROM stats_device_book s
          LEFT JOIN documents d ON d.user_id = s.user_id AND d.document = s.document
-         WHERE s.user_id = ? AND (? IS NULL OR s.device_id = ?)
+         WHERE s.user_id = ? AND (? IS NULL OR s.device_id = ?) AND s.updated_at >= ?
            AND (s.document > ? OR (s.document = ? AND s.device_id > ?))
          ORDER BY s.document, s.device_id LIMIT ?`
       )
-      .all(user.id, deviceId ?? null, deviceId ?? null, afterDocument, afterDocument, afterDevice, limit + 1) as {
+      .all(user.id, deviceId ?? null, deviceId ?? null, since, afterDocument, afterDocument, afterDevice, limit + 1) as {
       device_id: string;
       document: string;
       payload: string;
@@ -412,6 +416,8 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         stats: { ...JSON.parse(r.payload), daily: days.get(`${r.device_id}\n${r.document}`) ?? [] },
       })),
       next: rows.length > limit ? `${last.document}${last.device_id}` : null,
+      // Pass as `since` next time. Inclusive, so a book uploaded in this same second comes again.
+      until: now,
     });
   });
 

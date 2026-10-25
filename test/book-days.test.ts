@@ -62,6 +62,13 @@ describe('per-book days', () => {
     expect(own.items.map((i: { device_id: string }) => i.device_id)).toEqual(['x4', 'x4']);
     const all = await (await app.request('/api/v1/stats/books?device_id=', { headers })).json();
     expect(all.items).toHaveLength(3);
+
+    // Only what was uploaded since an earlier answer's `until`.
+    const until = all.until as number;
+    db.prepare('UPDATE stats_device_book SET updated_at = ? WHERE device_id = ?').run(until - 10, 'kobo');
+    db.prepare('UPDATE stats_device_book SET updated_at = ? WHERE device_id = ?').run(until, 'x4');
+    const changed = await (await app.request(`/api/v1/stats/books?since=${until}`, { headers })).json();
+    expect(changed.items.map((i: { device_id: string }) => i.device_id)).toEqual(['x4', 'x4']);
   });
 
   it('drive reading days and today in a filtered overview, and go with the book', async () => {
