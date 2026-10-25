@@ -620,10 +620,12 @@ filter's, when one is given).
 {"anchor_day": 9793, "...": "...", "groups": {"ja": {"reading_days": 88, "...": "..."}, "de": {"...": "..."}}}
 ```
 
-#### GET /api/v1/stats/global
+#### GET /api/v1/stats/global?device_id=&since=
 
-Raw per-device snapshots (`{"devices": [{"device_id", "device", "updated_at", "stats": {...}}]}`)
-for clients that render per-device numbers like the P2P screen does.
+Raw per-device snapshots (`{"devices": [{"device_id", "device", "updated_at", "stats": {...}}], "until": ...}`)
+for clients that render per-device numbers like the P2P screen does. Each device's `stats.daily` lists its days.
+`device_id` keeps one device. `since` keeps only the days uploaded at or after that time: pass the `until` of an
+earlier answer to fetch what changed since then. Imported BookOrbit time comes whole whenever its import changed.
 
 #### GET /api/v1/stats/books/{document}
 
