@@ -34,13 +34,14 @@ describe('manual moods', () => {
     expect((await put({ moods: [''] })).status).toBe(403);
     expect((await put({ moods: Array.from({ length: 13 }, (_, i) => `m${i}`) })).status).toBe(403);
 
-    // Trimmed and de-duplicated, returned, and in the book list.
-    expect(await (await put({ moods: [' tense ', 'tense', 'dark'] })).json()).toMatchObject({ moods: ['tense', 'dark'] });
-    expect(await listed()).toEqual(['tense', 'dark']);
+    // Spelled the way Hardcover's are (trimmed, one per name whatever the case, first letter capitalized), so
+    // "dark" set here and Hardcover's "Dark" count as one mood.
+    expect(await (await put({ moods: [' tense ', 'Tense', 'dark'] })).json()).toMatchObject({ moods: ['Tense', 'Dark'] });
+    expect(await listed()).toEqual(['Tense', 'Dark']);
 
     // Hardcover's lookup leaves them alone; null hands them back.
     await enrich();
-    expect(await listed()).toEqual(['tense', 'dark']);
+    expect(await listed()).toEqual(['Tense', 'Dark']);
     expect(await (await put({ moods: null })).json()).toMatchObject({ moods: [] });
     await enrich();
     expect(await listed()).toEqual(['Adventurous', 'Funny']);  // as Hardcover stores them
@@ -48,7 +49,7 @@ describe('manual moods', () => {
     // Genres and moods are set apart: one never touches the other.
     await put({ moods: ['dark'] });
     await put({ genres: ['Heist'] });
-    expect(await listed()).toEqual(['dark']);
+    expect(await listed()).toEqual(['Dark']);
   });
 
   it('keep manual moods through a merge, over Hardcover\'s', async () => {
@@ -61,6 +62,6 @@ describe('manual moods', () => {
 
     const merge = await app.request('/api/v1/documents/merge', { method: 'POST', headers, body: JSON.stringify({ document: OTHER, into: DOC }) });
     expect(merge.status).toBe(200);
-    expect(db.prepare('SELECT moods, moods_manual FROM documents WHERE document = ?').get(DOC)).toEqual({ moods: '["dark"]', moods_manual: 1 });
+    expect(db.prepare('SELECT moods, moods_manual FROM documents WHERE document = ?').get(DOC)).toEqual({ moods: '["Dark"]', moods_manual: 1 });
   });
 });

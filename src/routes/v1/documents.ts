@@ -5,7 +5,7 @@ import { isValidDocument, languageTag } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
 import { coverCandidates, documentInfo } from '../../models/cover.js';
-import { nextAfter, seriesBooks } from '../../models/hardcover-catalog.js';
+import { nextAfter, seriesBooks, tidy } from '../../models/hardcover-catalog.js';
 import { extractTitleAuthor } from '../../connectors/matching.js';
 import { documentMeta } from '../../connectors/store.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
@@ -290,13 +290,14 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const title = text(o.title);
     const author = text(o.author);
     const language = o.language === undefined || o.language === null ? o.language : languageTag(o.language);
-    // Genres and moods: the shape Hardcover's are stored in, a short list of short names, trimmed and
-    // de-duplicated. null clears a list; undefined leaves it alone.
+    // Genres and moods: a short list of short names, spelled the way Hardcover's are stored (tidy():
+    // trimmed, de-duplicated ignoring case, first letter capitalized), so the two sources count as one.
+    // null clears a list; undefined leaves it alone.
     const tags = (v: unknown, max: number) => {
-      const list = Array.isArray(v) ? [...new Set(v.map(text))] : v;
-      const ok = list === undefined || list === null ||
-        (Array.isArray(list) && list.length <= max && list.every((g) => typeof g === 'string' && g.length > 0 && g.length <= 64));
-      return { list: list as string[] | null | undefined, ok };
+      if (v === undefined || v === null) return { list: v as null | undefined, ok: true };
+      const ok = Array.isArray(v) &&
+        v.every((g) => typeof g === 'string' && g.trim().length > 0 && g.trim().length <= 64) && tidy(v, max + 1).length <= max;
+      return { list: ok ? tidy(v, max) : undefined, ok };
     };
     const genres = tags(o.genres, 10);
     const moods = tags(o.moods, 12);
