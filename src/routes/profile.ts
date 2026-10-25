@@ -4,6 +4,7 @@ import type { DB } from '../db/db.js';
 import type { AppEnv } from '../auth/middleware.js';
 import { combineGlobalStats, completedBookStatsSql, type GlobalStatsSnapshot } from '../models/stats.js';
 import { readBookorbitStats } from '../models/bookorbit-stats.js';
+import { readingActivity } from '../models/activity.js';
 import { fontFaces } from './web.js';
 
 const esc = (s: string) =>
@@ -35,7 +36,19 @@ export function profileSettingsRoutes(db: DB): Hono<AppEnv> {
   return app;
 }
 
+/** Consecutive reading days (YYYY-MM-DD, sorted) ending today or yesterday, in UTC. */
+export function syncStreak(days: string[], now = Date.now()): number {
+  // ponytail: UTC days, the visitor's and reader's time zones are unknown here.
+  const set = new Set(days);
+  const day = (offset: number) => new Date(now - offset * 86400000).toISOString().slice(0, 10);
+  let offset = set.has(day(0)) ? 0 : 1;
+  let streak = 0;
+  while (set.has(day(offset++))) streak++;
+  return streak;
+}
+
 interface ProfileBook {
+  document: string;
   title: string | null;
   author: string | null;
   filename: string | null;
@@ -64,7 +77,7 @@ export function publicProfileRoutes(db: DB, basePath: string): Hono<AppEnv> {
     // Newest progress per book (SQLite returns the MAX row's other columns), status as in GET /progress.
     const books = db
       .prepare(
-        `SELECT d.title, d.author, d.filename, d.cover_url, p.percentage,
+        `SELECT p.document, d.title, d.author, d.filename, d.cover_url, p.percentage,
                 COALESCE(d.status, CASE WHEN p.percentage >= 0.98 OR ${completedBookStatsSql('p.user_id', 'p.document')}
                   THEN 'finished' ELSE 'reading' END) AS status
          FROM (SELECT user_id, document, percentage, MAX(updated_at) AS at FROM progress WHERE user_id = ? GROUP BY document) p
@@ -76,8 +89,23 @@ export function publicProfileRoutes(db: DB, basePath: string): Hono<AppEnv> {
     const reading = books.filter((b) => b.status === 'reading');
     const finished = books.filter((b) => b.status === 'finished');
 
+    // Pages and streak as the app's library header counts them: from the sync
+    // history, so readers that never upload stats still get them.
+    const activity = readingActivity(db, user.id, 0);
+    const listed = new Set(books.map((b) => b.document));
+    const pages = activity.books.reduce((n, b) => n + (listed.has(b.document) ? (b.pages_read ?? 0) : 0), 0);
+    const streak = Math.max(stats.current_streak, syncStreak(activity.reading_days));
+
     const name = esc(user.username);
-    const tile = (value: string | number, label: string) => `<div class="tile"><b>${value}</b><span>${label}</span></div>`;
+    // Zero stats are left out: a reader that never uploads time shouldn't show "0 hours read".
+    const tile = (value: number, label: string) =>
+      value > 0 ? `<div class="tile"><b>${value.toLocaleString('en-US')}</b><span>${label}</span></div>` : '';
+    const tiles = [
+      tile(Math.round(stats.seconds / 3600), 'hours read'),
+      tile(pages, 'pages read'),
+      tile(finished.length, 'books finished'),
+      tile(streak, 'day streak'),
+    ].join('');
     const book = (b: ProfileBook) => {
       const title = esc(b.title ?? b.filename!.replace(/\.[a-z0-9]+$/i, ''));
       const cover = b.cover_url && /^https?:\/\//.test(b.cover_url) ? `<img src="${esc(b.cover_url)}" alt="" loading="lazy">` : '<div class="blank"></div>';
@@ -110,7 +138,7 @@ li>div{min-width:0;flex:1}.t{margin:0;font-weight:600;overflow:hidden;text-overf
 footer{margin-top:32px;color:var(--soft);font-size:12px}footer a{color:inherit}
 </style></head><body><main>
 <h1>${name}'s reading</h1>
-<div class="tiles">${tile(Math.round(stats.seconds / 3600).toLocaleString('en-US'), 'hours read')}${tile(stats.pages.toLocaleString('en-US'), 'pages')}${tile(finished.length, 'books finished')}${tile(stats.current_streak, 'day streak')}</div>
+${tiles ? `<div class="tiles">${tiles}</div>` : ''}
 ${shelf('Reading now', reading)}
 ${shelf('Finished', finished)}
 <footer>Synced with <a href="https://crosspointreader.com" target="_blank" rel="noopener">CrossPoint Sync</a></footer>

@@ -42,6 +42,10 @@
 
 html { color-scheme: light; }
 
+/* Chromium paints a select's open list with the select's own background, so a
+   bg-transparent select drops a see-through list over the page. */
+option { background-color: var(--color-surface); color: var(--color-stone-900); }
+
 /* Dark mode: the same utilities, remapped. Stone flips so text-stone-900 stays the
    strongest text and bg-stone-50 the page; brand keeps its mid tones for buttons
    and lightens where it is used as text. Set by theme.js (and index.html, pre-paint). */

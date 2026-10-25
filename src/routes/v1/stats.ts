@@ -13,7 +13,7 @@ import {
   type DailyReading,
   type GlobalStatsSnapshot,
 } from '../../models/stats.js';
-import { computeActivity, type DocInfo, type LogRow } from '../../models/activity.js';
+import { readingActivity } from '../../models/activity.js';
 import { documentInfo } from '../../models/cover.js';
 import { resolveDocument, statsAliases, statsDocuments } from '../../models/merge.js';
 import type { HttpTransport } from '../../connectors/types.js';
@@ -126,38 +126,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       .all(userId, MAX_INFO_LOOKUPS) as { document: string }[];
     await Promise.all(pending.map((d) => documentInfo(db, userId, d.document, http).catch(() => null)));
 
-    const rows = db
-      .prepare('SELECT document, percentage, at FROM progress_log WHERE user_id = ?')
-      .all(userId) as unknown as LogRow[];
-    const docs = new Map(
-      (
-        db
-          .prepare('SELECT document, page_count, status, status_at, start_date, finished_date FROM documents WHERE user_id = ?')
-          .all(userId) as unknown as (DocInfo & { document: string })[]
-      ).map((d) => [d.document, d])
-    );
-    // CrossInk's own finish dates, combined across devices like /stats/books/:document.
-    const merged = statsAliases(db, userId);
-    const snapshotsByDoc = new Map<string, BookStatsSnapshot[]>();
-    for (const r of db
-      .prepare('SELECT document, payload FROM stats_device_book WHERE user_id = ?')
-      .all(userId) as { document: string; payload: string }[]) {
-      const document = merged.get(r.document) ?? r.document;
-      const list = snapshotsByDoc.get(document) ?? [];
-      list.push(JSON.parse(r.payload) as BookStatsSnapshot);
-      snapshotsByDoc.set(document, list);
-    }
-    const finishedDates = new Map<string, number>();
-    const startDates = new Map<string, number>();
-    for (const [document, snapshots] of snapshotsByDoc) {
-      const combined = combineBookStats(snapshots);
-      if (combined.completed && combined.finished_date > 0) finishedDates.set(document, combined.finished_date);
-      if (combined.start_date > 0) startDates.set(document, combined.start_date);
-    }
-    const activity = computeActivity(rows, docs, tz, finishedDates, startDates);
-    const imported = readBookorbitStats(db, userId);
-    activity.reading_days = [...new Set([...activity.reading_days, ...imported.daily.map((d) => d.date)])].sort();
-    return activity;
+    return readingActivity(db, userId, tz);
   }
 
 
