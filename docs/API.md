@@ -639,10 +639,15 @@ stay under the hash each device uploaded them with and are combined on read. Wit
 
 ### Documents metadata (optional)
 
-`PUT /api/v1/documents` — `{"items": [{"document": "...", "title": "...", "author": "...",
-"filename": "...", "filesize": 812345}]}` (max 50); omitted fields never overwrite stored values.
-`GET /api/v1/documents` lists them. Most clients don't need this endpoint — progress-PUT
-`metadata` capture populates the same table.
+`PUT /api/v1/documents` — `{"items": [{"document": "...", "title": "...", "authors": "...",
+"language": "ja", "filename": "...", "filesize": 812345, "bookfusion_id": "36835"}]}` (max 50).
+
+Each item takes the same fields as progress-PUT `metadata`, with the same rules (see Metadata
+capture above): omitted fields never overwrite stored values, `language` only fills a blank, and
+`<service>_id` fields seed exact connector matches. `author` is still accepted for `authors`, and
+`filesize` is this endpoint's own. Use it for books whose metadata a client knows without a
+progress update, e.g. books it only uploads stats for. A merged copy's metadata goes to its book.
+`GET /api/v1/documents` lists them.
 
 #### PUT /api/v1/documents/{document}/status
 

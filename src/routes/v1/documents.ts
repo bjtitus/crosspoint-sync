@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
-import { isValidDocument, languageTag } from '../kosync.js';
+import { isValidDocument, languageTag, parseMetadata, saveDocumentMetadata, type DocumentMetadata } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
 import { coverCandidates, documentInfo } from '../../models/cover.js';
@@ -45,43 +45,33 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     const user = c.get('user');
     const now = nowSeconds();
-    const upsert = db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+    // filesize is this endpoint's own; a value sent replaces the stored one, as title and filename do.
+    const upsertSize = db.prepare(
+      `INSERT INTO documents (user_id, document, filesize, updated_at) VALUES (?, ?, ?, ?)
        ON CONFLICT(user_id, document) DO UPDATE SET
-         title = CASE WHEN documents.meta_manual THEN documents.title ELSE COALESCE(excluded.title, documents.title) END,
-         author = CASE WHEN documents.meta_manual THEN documents.author ELSE COALESCE(excluded.author, documents.author) END,
-         filename = COALESCE(excluded.filename, documents.filename),
          filesize = COALESCE(excluded.filesize, documents.filesize),
          updated_at = excluded.updated_at`
     );
-    type Row = {
-      document: string;
-      title: string | null;
-      author: string | null;
-      filename: string | null;
-      filesize: number | null;
-    };
-    const rows: Row[] = [];
+    const rows: { document: string; meta: DocumentMetadata | null; filesize: number | null }[] = [];
     for (const raw of items) {
-      const o = raw as Record<string, unknown>;
+      const o = (raw ?? {}) as Record<string, unknown>;
       if (!isValidDocument(o.document)) {
         return kosyncError(c, 403, 2003, 'Invalid request');
       }
       rows.push({
         document: o.document,
-        title: typeof o.title === 'string' ? o.title.slice(0, 512) : null,
-        author: typeof o.author === 'string' ? o.author.slice(0, 512) : null,
-        filename: typeof o.filename === 'string' ? o.filename.slice(0, 512) : null,
+        // The fields progress metadata takes; `author` is still read for older clients.
+        meta: parseMetadata({ ...o, authors: typeof o.authors === 'string' && o.authors ? o.authors : o.author }),
         filesize:
-          typeof o.filesize === 'number' && Number.isInteger(o.filesize) && o.filesize >= 0
-            ? o.filesize
-            : null,
+          typeof o.filesize === 'number' && Number.isInteger(o.filesize) && o.filesize >= 0 ? o.filesize : null,
       });
     }
     withTransaction(db, () => {
       for (const r of rows) {
-        upsert.run(user.id, r.document, r.title, r.author, r.filename, r.filesize, now);
+        // A merged copy's metadata goes to its book, as with progress.
+        const document = resolveDocument(db, user.id, r.document);
+        upsertSize.run(user.id, document, r.filesize, now);
+        if (r.meta) saveDocumentMetadata(db, user.id, document, r.meta, now);
       }
     });
     return c.json({ until: now, accepted: rows.length });
