@@ -669,14 +669,25 @@ the server has `GOOGLE_BOOKS_API_KEY`, then Amazon's "Print length" via SearchAP
 #### PUT /api/v1/documents/{document}/info
 
 Manual fixes when the lookup got it wrong: `{"cover_url": "https://...", "page_count": 433,
-"genres": ["Fantasy", "Heist"], "moods": ["tense", "dark"]}` (every field optional). Manual values stick,
-since lookups only fill blanks and Hardcover's lookup leaves manual genres and moods alone; `null` clears a
-field so it's looked up again. `genres` takes up to 10 names and `moods` up to 12, each at most 64
-characters; a list replaces the stored one, so to add one send the current list with it. Names are stored the
-way Hardcover's are (trimmed, one per name whatever the case, first letter capitalized), so "dark" set here and
-Hardcover's "Dark" count as one. `language` (a BCP 47
-tag) can be set the same way and then stays over device syncs; `null` clears it so the next device sync fills
-it again. Returns the stored `{document, cover_url, page_count, title, author, language, genres, moods}`.
+"genres": ["Fantasy", "Heist"], "moods": ["Tense"], "series": "The Founders", "series_position": 1}` (every
+field optional). Manual values stick: lookups only fill blanks, and Hardcover's lookup leaves details set here
+alone. `null` clears a field so it's looked up again.
+
+The details Hardcover fills in can all be set this way:
+
+- `genres` (up to 10), `moods` (up to 12) and `content_warnings` (up to 12): lists of names of at most 64
+  characters. A list replaces the stored one, so to add one send the current list with it. Names are stored
+  the way Hardcover's are (trimmed, one per name whatever the case, first letter capitalized), so "dark" set
+  here and Hardcover's "Dark" count as one.
+- `description`: up to 6000 characters.
+- `release_year`: a whole number from 1 to 9999.
+- `series` with an optional `series_position` (a number from 0 to 10000). They go together: a series set here
+  replaces Hardcover's series and number, and next-in-series lookups stop for the book, since they follow
+  Hardcover's series. `series_position` without `series` is rejected; `series: null` hands both back.
+
+`language` (a BCP 47 tag) can be set the same way and then stays over device syncs; `null` clears it so the
+next device sync fills it again. Returns the stored `{document, cover_url, page_count, title, author, language,
+genres, moods, content_warnings, description, series, series_position, release_year}`.
 
 #### GET /api/v1/documents/{document}/cover/candidates?q=
 

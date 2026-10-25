@@ -5,6 +5,7 @@ import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
 import { cacheKey, hardcoverBook, type HardcoverBook } from './hardcover-catalog.js';
+import { keepManual } from './manual-details.js';
 
 /**
  * Cover art and print page count from title/author. Covers use the same
@@ -215,13 +216,13 @@ async function sharedBookInfo(
   return info;
 }
 
-/** Store Hardcover's details on a document (a miss just records the check). Genres and moods set by hand stay. */
+/** Store Hardcover's details on a document (a miss just records the check). Details set by hand stay. */
 function saveHardcover(db: DB, userId: number, document: string, hc: HardcoverBook | null): void {
   const json = (v: string[] | undefined) => (v?.length ? JSON.stringify(v) : null);
   db.prepare(
-    `UPDATE documents SET hc_id = ?, hc_slug = ?, moods = CASE WHEN moods_manual THEN moods ELSE ? END,
-       genres = CASE WHEN genres_manual THEN genres ELSE ? END, content_warnings = ?, rating = ?,
-       series = ?, hc_series_id = ?, series_position = ?, release_year = ?, description = ?, hc_checked_at = ?
+    `UPDATE documents SET hc_id = ?, hc_slug = ?, ${keepManual('moods')}, ${keepManual('genres')},
+       ${keepManual('content_warnings')}, rating = ?, ${keepManual('series')}, ${keepManual('hc_series_id')},
+       ${keepManual('series_position')}, ${keepManual('release_year')}, ${keepManual('description')}, hc_checked_at = ?
      WHERE user_id = ? AND document = ?`
   ).run(
     hc?.id ?? null, hc?.slug ?? null, json(hc?.moods), json(hc?.genres), json(hc?.content_warnings), hc?.rating ?? null,
