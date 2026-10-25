@@ -44,7 +44,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     const user = c.get('user');
     const now = nowSeconds();
-    // filesize is this endpoint's own; it fills a blank like the rest.
+    // filesize is this endpoint's own; a value sent replaces the stored one, as title and filename do.
     const upsertSize = db.prepare(
       `INSERT INTO documents (user_id, document, filesize, updated_at) VALUES (?, ?, ?, ?)
        ON CONFLICT(user_id, document) DO UPDATE SET
