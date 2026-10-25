@@ -562,9 +562,14 @@ Batch (max 20) of per-book `stats_v5` snapshots for one device:
    "avg_fwd": 12, "pace_n": 250, "eta": 5400,
    "start_manual": false, "finish_manual": false,
    "start_date": 1751000000, "finished_date": 0,
-   "tod": [0, 3000, 4000, 1400], "dow": [0, 0, 1200, 0, 2000, 3000, 2200]}
+   "tod": [0, 3000, 4000, 1400], "dow": [0, 0, 1200, 0, 2000, 3000, 2200],
+   "daily": [{"date": "2026-10-23", "seconds": 900}]}
 ]}
 ```
+
+`daily` is optional: the book's seconds per local day, up to 20 per item, in the same shape as the
+global upload's. A day sent again keeps the larger value, so a client can resend today as it grows.
+The answer counts them as `accepted_daily`.
 
 #### GET /api/v1/stats/summary
 
@@ -609,8 +614,9 @@ Filters narrow the digest to matching books: `language` (main subtag, so `en` al
 `genre` (one of the book's genres) and `author` (part of the name). All ignore case and can be combined.
 A filtered digest counts only per-book data: the books' sync and session days, their finished counts and
 pages, and their measured time (per-book stats and reading sessions). Device-wide totals with no book
-attached are left out. Per-book stats have no days, so `today_seconds` and `week_seconds` count only
-reading sessions there.
+attached are left out. Reading days and time per day come from the books' uploaded days, reading
+sessions and imported time; where a book's sessions and its devices' days measure the same day, the
+larger one counts.
 
 `group_by=language` or `group_by=genre` adds `groups`, one digest per value, for the 20 values with the
 most reading days. A book counts in each of its genres. The top-level fields stay the account's (or the
@@ -628,7 +634,23 @@ for clients that render per-device numbers like the P2P screen does.
 #### GET /api/v1/stats/books/{document}
 
 Per-device rows plus a `combined` object (scalars/buckets summed, `completed` OR-ed, `avg_fwd`
-weighted by `pace_n`, `start_date` = earliest non-zero, `finished_date` = latest).
+weighted by `pace_n`, `start_date` = earliest non-zero, `finished_date` = latest). Each row's
+`stats.daily` holds that device's days for the book; `combined.daily` sums every device per date. A
+device restoring its own history reads its own row, so another device's time is never folded in.
+
+#### GET /api/v1/stats/books?device_id=&limit=&cursor=
+
+Every book's stats, one item per device and book, ordered by document. Each item carries the book's
+`title`, `author`, `filename` and `language`, so a client can match it to a file without knowing the
+hash, plus `stats` with `daily` as above. `device_id` keeps one device's items. `limit` defaults to 50
+(at most 200); pass the answer's `next` as `cursor` for the following page, until it is `null`.
+
+```json
+{"items": [{"device_id": "A1B2C3D4", "document": "a1b2...", "title": "Kokoro", "author": null,
+  "filename": "kokoro.epub", "language": "ja", "updated_at": 1761300000,
+  "stats": {"v": 5, "sessions": 9, "...": "...", "daily": [{"date": "2026-10-23", "seconds": 900}]}}],
+ "next": "a1b2...A1B2C3D4"}
+```
 
 Merged documents (`POST /api/v1/documents/merge`, `{"document", "into", "stats"?}`): stats rows
 stay under the hash each device uploaded them with and are combined on read. With `"stats": true`
