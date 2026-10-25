@@ -33,6 +33,11 @@ const MAX_OVERVIEW_DAYS = 3650;
 // Genre groups can be many; the overview returns the ones with the most reading days.
 const MAX_OVERVIEW_GROUPS = 20;
 
+/** A YYYY-MM-DD date as days since 2000-01-01. */
+function dayNumber(date: string): number {
+  return Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000) - EPOCH_DAY;
+}
+
 /** Days from a date -> seconds map, in date order. */
 function sortedDays(days: Map<string, number>): DailyReading[] {
   return [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, seconds]) => ({ date, seconds }));
@@ -365,7 +370,8 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   // `device_id` keeps one device's; `cursor` is the previous page's `next`.
   app.get('/stats/books', (c) => {
     const user = c.get('user');
-    const deviceId = c.req.query('device_id');
+    // An empty device_id means no filter, not a device called "".
+    const deviceId = c.req.query('device_id') || undefined;
     const cursor = c.req.query('cursor') ?? '';
     const limitRaw = Number(c.req.query('limit') ?? DEFAULT_BOOK_PAGE);
     const limit = Number.isInteger(limitRaw) && limitRaw >= 1 ? Math.min(limitRaw, MAX_BOOK_PAGE) : DEFAULT_BOOK_PAGE;
@@ -430,7 +436,6 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     const activity = await activityFor(user.id, tz);
     const day = (t: number) => Math.floor(t / 86400000) - EPOCH_DAY; // days since 2000-01-01
-    const dayOf = (name: string) => day(Date.parse(`${name}T00:00:00Z`));
     const today = day(Date.now() - tz * 60000);
     const year = new Date(Date.now() - tz * 60000).getUTCFullYear();
 
@@ -469,13 +474,13 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const account = () => {
       const { summary, daily } = summaryFor(user.id);
       const read = new Set<number>();
-      for (const d of activity.reading_days) read.add(dayOf(d));
-      for (const [d, seconds] of daily) if (seconds > 0) read.add(dayOf(d));
+      for (const d of activity.reading_days) read.add(dayNumber(d));
+      for (const [d, seconds] of daily) if (seconds > 0) read.add(dayNumber(d));
       if (summary.anchor_day > 0 && summary.history_b64) {
         const bits = Buffer.from(summary.history_b64, 'base64');
         for (let n = 0; n < bits.length * 8; n++) if (bits[n >> 3] & (1 << (n & 7))) read.add(summary.anchor_day - n);
       }
-      const perDay = new Map([...daily].map(([d, seconds]) => [dayOf(d), seconds] as [number, number]));
+      const perDay = new Map([...daily].map(([d, seconds]) => [dayNumber(d), seconds] as [number, number]));
       return digest(read, activity.books, activity.pages_total, { seconds: summary.seconds, sessions: summary.sessions, perDay });
     };
     if (!filter.active && !groupBy) return c.json(account());
@@ -484,7 +489,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const books = booksFor(user.id);
     const forBooks = (keep: (d: string) => boolean) => {
       const read = new Set<number>();
-      for (const d of activity.days) if (d.books.some((b) => keep(b.document))) read.add(dayOf(d.day));
+      for (const d of activity.days) if (d.books.some((b) => keep(b.document))) read.add(dayNumber(d.day));
       const perDay = new Map<number, number>();
       let seconds = 0;
       let sessions = 0;
@@ -597,15 +602,16 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       t.seconds = combined.seconds;
       t.sessions = combined.sessions;
     }
-    const dayOf = (date: string) => Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000) - EPOCH_DAY;
-    // Per-book days devices uploaded with their snapshots.
-    for (const r of db.prepare('SELECT document, date, seconds FROM stats_device_book_day WHERE user_id = ?').all(userId) as {
+    // Per-book days devices uploaded with their snapshots, every device's summed.
+    for (const r of db
+      .prepare('SELECT document, date, SUM(seconds) AS seconds FROM stats_device_book_day WHERE user_id = ? GROUP BY document, date')
+      .all(userId) as {
       document: string;
       date: string;
       seconds: number;
     }[]) {
       const t = entry(r.document);
-      const d = dayOf(r.date);
+      const d = dayNumber(r.date);
       t.perDay.set(d, (t.perDay.get(d) ?? 0) + Number(r.seconds));
     }
     // Time imported from BookOrbit is one more device's. Only books matched to a BookOrbit book have
@@ -622,7 +628,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       t.seconds += imported.book.seconds;
       t.sessions += imported.book.sessions;
       for (const day of imported.daily) {
-        const d = dayOf(day.date);
+        const d = dayNumber(day.date);
         t.perDay.set(d, (t.perDay.get(d) ?? 0) + day.seconds);
       }
     }

@@ -642,7 +642,8 @@ device restoring its own history reads its own row, so another device's time is 
 
 Every book's stats, one item per device and book, ordered by document. Each item carries the book's
 `title`, `author`, `filename` and `language`, so a client can match it to a file without knowing the
-hash, plus `stats` with `daily` as above. `device_id` keeps one device's items. `limit` defaults to 50
+hash, plus `stats` with `daily` as above. Items are stored rows: a merged copy is listed under its own hash, where
+`GET /stats/books/{document}` folds it into its book. `device_id` keeps one device's items. `limit` defaults to 50
 (at most 200); pass the answer's `next` as `cursor` for the following page, until it is `null`.
 
 ```json

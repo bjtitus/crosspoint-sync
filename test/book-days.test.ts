@@ -60,6 +60,8 @@ describe('per-book days', () => {
 
     const own = await (await app.request('/api/v1/stats/books?device_id=x4', { headers })).json();
     expect(own.items.map((i: { device_id: string }) => i.device_id)).toEqual(['x4', 'x4']);
+    const all = await (await app.request('/api/v1/stats/books?device_id=', { headers })).json();
+    expect(all.items).toHaveLength(3);
   });
 
   it('drive reading days and today in a filtered overview, and go with the book', async () => {
