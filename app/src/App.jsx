@@ -43,7 +43,12 @@ function Login({ onLogin }) {
   const [busy, setBusy] = useState(false)
   const passwordRef = useRef(null)
   const usernameRef = useRef(null)
-  const set = (name) => (e) => setForm({ ...form, [name]: e.target.value })
+  // Functional update: a password manager fills both fields in one go, and spreading
+  // this render's `form` would let the second fill wipe out the first.
+  const set = (name) => (e) => {
+    const value = e.target.value
+    setForm((f) => ({ ...f, [name]: value }))
+  }
   // Keyboard "Next" moves to the following field instead of submitting early.
   const next = (ref) => (e) => {
     if (e.key === 'Enter') {
@@ -58,8 +63,11 @@ function Login({ onLogin }) {
     setError(null)
     try {
       const server = hostedServer ?? (form.selfHosted ? form.server : DEFAULT_SERVER)
-      if (creating && form.password.length < 4) throw new Error('Pick a password of at least 4 characters.')
-      onLogin(await (creating ? register : login)(server, form.username, form.password))
+      // What the fields show, even if autofill set them without an input event.
+      const username = usernameRef.current?.value ?? form.username
+      const password = passwordRef.current?.value ?? form.password
+      if (creating && password.length < 4) throw new Error('Pick a password of at least 4 characters.')
+      onLogin(await (creating ? register : login)(server, username, password))
     } catch (err) {
       setError(err.status === 401 ? 'Wrong username or password.' : err.message)
     }

@@ -79,6 +79,16 @@ describe('kosync mirror connector (unit)', () => {
 });
 
 describe('kosync mirror fan-out (end to end)', () => {
+  it('explains an unreachable server instead of "fetch failed"', async () => {
+    const { app } = makeTestApp({}, { connectorTransport: async () => { throw new TypeError('fetch failed'); } });
+    const { headers } = await registerUser(app);
+    const link = await app.request('/api/v1/connectors/kosync', {
+      method: 'PUT', headers, body: JSON.stringify({ credential: { server: 'http://nas.local:8143', username: 'u', password: 'p' } }),
+    });
+    expect(link.status).toBe(400);
+    expect(((await link.json()) as { message: string }).message).toMatch(/home network/);
+  });
+
   it('a device progress push enqueues + delivers to the mirror', async () => {
     const fake = fakeTransport();
     fake.on('/users/auth', 200, {}); // validate on link
@@ -95,13 +105,17 @@ describe('kosync mirror fan-out (end to end)', () => {
     await app.request('/syncs/progress', {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.5, device_id: 'd1' }),
+      body: JSON.stringify({
+        document: DOC, progress: '/body/p[2]', percentage: 0.5, device_id: 'd1',
+        metadata: { title: 'Piranesi', authors: 'Susanna Clarke', filename: 'piranesi.epub' },
+      }),
     });
     expect(claimReady(db, 10).length).toBeGreaterThan(0);
     fake.on('/syncs/progress', 200, {});
     await drainQueue(db, fake.transport, 10);
-    // A mirror PUT to the target server happened.
-    expect(fake.calls.some((c) => c.url.includes('mirror.test') && c.url.includes('/syncs/progress') && c.method === 'PUT')).toBe(true);
+    // A mirror PUT to the target server happened, carrying the book's metadata (#50).
+    const put = fake.calls.find((c) => c.url.includes('mirror.test') && c.url.includes('/syncs/progress') && c.method === 'PUT');
+    expect(JSON.parse(put!.body!).metadata).toEqual({ title: 'Piranesi', authors: 'Susanna Clarke', filename: 'piranesi.epub' });
     expect(claimReady(db, 10)).toHaveLength(0);
   });
 });

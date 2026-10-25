@@ -28,6 +28,8 @@
 	<array>
 		<string>_http._tcp</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>CrossPoint Sync uses the camera when you take a photo for a wallpaper.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>CrossPoint Sync sends books to your CrossPoint reader over your Wi-Fi.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

@@ -54,9 +54,10 @@ export const search = (cat, query) => memo(`s ${authKey(cat)} ${cat.url} ${query
 export const needsAuthedImage = (cat, url) => !!url && (cat.auth?.kind ?? 'none') !== 'none' && /^https?:/i.test(url)
 export const image = (cat, url) => memo(`i ${authKey(cat)} ${url}`, () => invoke('opds_image', { url, auth: cat.auth }))
 
-// Rows worth showing from a feed's navigation: drop page chrome (start, self, html alternates).
+// Rows worth showing from a feed's navigation: drop page chrome (start, self, html
+// alternates, and the first/last page links Calibre's content server adds).
 export const navRows = (links) =>
-  links.filter((l) => !['start', 'self', 'alternate', 'search', 'up'].includes(l.rel) && !/html/.test(l.mime ?? ''))
+  links.filter((l) => !['start', 'self', 'alternate', 'search', 'up', 'first', 'last'].includes(l.rel) && !/html/.test(l.mime ?? ''))
 
 // Formats CrossPoint reads, best first.
 const FORMATS = [

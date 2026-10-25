@@ -40,7 +40,7 @@
       "versionCode": 1005
     },
     "iOS": {
-      "minimumSystemVersion": "15.0",
+      "minimumSystemVersion": "16.0",
       "developmentTeam": "96247QW4R8",
       "bundleVersion": "7"
     }

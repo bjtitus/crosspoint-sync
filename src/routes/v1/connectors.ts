@@ -93,6 +93,9 @@ async function exchangeOAuth(
   return {};
 }
 
+const UNREACHABLE_SERVER =
+  "Couldn't reach that server from your sync server. It needs an address the sync server can reach: a server only on your home network works if you self-host CrossPoint Sync on that network.";
+
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 const page = (title: string, body: string) =>
@@ -242,7 +245,10 @@ export function connectorRoutes(
     }
     const result = await conn.validate(cred as Record<string, unknown>, transport);
     if (!result.ok) {
-      return c.json({ code: 2003, message: result.error ?? 'Credential rejected' }, 400);
+      // Node's fetch says only "fetch failed" for an unreachable host, such as an
+      // address on the user's home network that this server can't see.
+      const message = result.error === 'fetch failed' ? UNREACHABLE_SERVER : (result.error ?? 'Credential rejected');
+      return c.json({ code: 2003, message }, 400);
     }
     const user = c.get('user');
     const first = !getAccount(db, user.id, conn.id);

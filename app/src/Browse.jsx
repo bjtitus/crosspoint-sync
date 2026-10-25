@@ -114,10 +114,12 @@ function useSeen() {
   return [ref, seen]
 }
 
-function Cover({ cat, entry, large = false, className = '' }) {
+function Cover({ cat, entry, className = '' }) {
   const [broken, setBroken] = useState(false)
   const [ref, seen] = useSeen()
-  const src = useCoverSrc(cat, large ? (entry.cover ?? entry.thumbnail) : (entry.thumbnail ?? entry.cover), seen)
+  // The full cover even in grids: some servers' thumbnails (Calibre's) are too small
+  // for a phone screen. Covers only load as they near the screen.
+  const src = useCoverSrc(cat, entry.cover ?? entry.thumbnail, seen)
   const frame = `aspect-[2/3] overflow-hidden rounded-md shadow-sm ring-1 ring-stone-950/10 ${className}`
   if (src && !broken) return <img ref={ref} src={src} alt="" loading="lazy" onError={() => setBroken(true)} className={`${frame} block h-auto max-w-full object-cover`} />
   return (
@@ -288,7 +290,7 @@ function BookPage({ cat, entryKey }) {
       <BackBar back="history" label="Back" />
       <div className="mt-3 md:grid md:grid-cols-[15rem_1fr] md:items-start md:gap-10 lg:grid-cols-[18rem_1fr] lg:gap-14">
         <aside className="md:sticky md:top-8">
-          <Cover cat={cat} entry={entry} large className="mx-auto w-44 shadow-lg md:w-full" />
+          <Cover cat={cat} entry={entry} className="mx-auto w-44 shadow-lg md:w-full" />
         </aside>
 
         <div className="@container mt-6 md:mt-0 md:max-w-2xl">

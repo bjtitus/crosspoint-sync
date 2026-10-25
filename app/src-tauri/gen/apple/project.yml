@@ -2,7 +2,7 @@ name: crosspoint-sync-app
 options:
   bundleIdPrefix: com.crosspointreader.sync
   deploymentTarget:
-    iOS: 15.0
+    iOS: 16.0
 fileGroups: [../../src]
 configs:
   debug: debug
@@ -61,6 +61,8 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         # Save image: share cards and wallpapers go to Photos (add-only access).
+        # The image picker (wallpapers) offers the camera; iOS kills the app without this.
+        NSCameraUsageDescription: CrossPoint Sync uses the camera when you take a photo for a wallpaper.
         NSPhotoLibraryAddUsageDescription: CrossPoint Sync saves the images you create, like wallpapers and share cards, to your photo library.
         # Other saved files (clippings Markdown) show in the Files app.
         UIFileSharingEnabled: true
@@ -116,7 +118,7 @@ targets:
   CrossPointWidget:
     type: app-extension
     platform: iOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "16.0"
     sources:
       - path: CrossPointWidget
     info:

@@ -74,11 +74,13 @@ export default function Clippings({ session, books }) {
   const counts = all.reduce((m, c) => m.set(c.document, (m.get(c.document) ?? 0) + 1), new Map())
   const daily = all.length ? ofTheDay(all) : null
 
-  async function exportMd(save) {
+  async function exportMd(save, e) {
+    // A <details> menu stays open until toggled; close it so the note shows.
+    e.currentTarget.closest('details').open = false
     const md = `# Clippings\n\n${markdown(groups)}\n`
     if (save) {
       await saveFile(new Blob([md], { type: 'text/markdown' }), 'CrossPoint clippings.md')
-      setNote(/iphone|ipad/i.test(navigator.userAgent) ? 'Saved to CrossPoint Sync in the Files app.' : 'Saved to your Downloads folder.')
+      setNote(/iphone|ipad/i.test(navigator.userAgent) ? 'Saved in the Files app: On My iPhone › CrossPoint Sync.' : 'Saved to your Downloads folder.')
     } else {
       await navigator.clipboard.writeText(md)
       setNote(`Copied ${matches.length} clipping${matches.length === 1 ? '' : 's'} as Markdown.`)
@@ -127,11 +129,11 @@ export default function Clippings({ session, books }) {
                 <FileDown aria-hidden="true" className="size-5" strokeWidth={1.75} />
               </summary>
               <div className="absolute right-0 z-20 mt-1 w-48 rounded-xl bg-surface p-2 shadow-lg ring-1 ring-stone-950/10">
-                <button onClick={() => exportMd(false)} className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100">
+                <button onClick={(e) => exportMd(false, e)} className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100">
                   <Copy className="size-4" /> Copy Markdown
                 </button>
                 {isApp && (
-                  <button onClick={() => exportMd(true)} className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100">
+                  <button onClick={(e) => exportMd(true, e)} className="flex h-11 w-full items-center gap-2 rounded-lg px-3 text-sm font-medium text-stone-700 hover:bg-stone-100">
                     <FileDown className="size-4" /> Save .md
                   </button>
                 )}

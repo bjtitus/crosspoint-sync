@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type {
   Connector,
+  ConnectorContext,
   Credential,
   DocumentMeta,
   HttpTransport,
@@ -9,6 +10,7 @@ import type {
   PushResult,
   ValidateResult,
 } from './types.js';
+import { documentMeta } from './store.js';
 
 /**
  * External kosync mirror connector. Forwards reading progress to ANOTHER kosync
@@ -88,7 +90,8 @@ async function push(
   cred: Credential,
   m: Match,
   ev: OutboundEvent,
-  http: HttpTransport
+  http: HttpTransport,
+  ctx?: ConnectorContext
 ): Promise<PushResult> {
   const c = parseCred(cred);
   if (!c) return { ok: false, retryable: false, needsReauth: true, error: 'bad credential' };
@@ -104,6 +107,15 @@ async function push(
   };
   // Forward the rich position superset (a plain kosync target ignores it).
   if (ev.position) body.position = ev.position;
+  // Book metadata in the KOReader progress format, so a CrossPoint Sync target can
+  // show the book (a plain kosync target ignores it).
+  if (ctx) {
+    const meta = documentMeta(ctx.db, ctx.userId, ev.document);
+    const metadata = Object.fromEntries(
+      Object.entries({ title: meta.title, authors: meta.author, filename: meta.filename }).filter(([, v]) => v)
+    );
+    if (Object.keys(metadata).length) body.metadata = metadata;
+  }
 
   try {
     const res = await http(`${baseUrl(c.server)}/syncs/progress`, {
