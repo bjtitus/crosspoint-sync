@@ -166,6 +166,12 @@ export async function searchHardcover(
 export const cacheKey = (title: string, author: string) => `${normalizeText(coreTitle(title))}|${normalizeAuthor(author)}`;
 
 /** Shared, cached lookup: one Hardcover request per distinct book across all users. */
+/** Hardcover's cached match for a title, without a lookup (null when none is cached). */
+export function cachedHardcoverBook(db: DB, title: string, author: string): HardcoverBook | null {
+  const hit = db.prepare('SELECT data FROM catalog_cache WHERE key = ?').get(cacheKey(title, author)) as { data: string | null } | undefined;
+  return hit?.data ? (JSON.parse(hit.data) as HardcoverBook) : null;
+}
+
 export async function hardcoverBook(
   db: DB,
   http: HttpTransport,

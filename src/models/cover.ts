@@ -4,7 +4,7 @@ import { fetchTransport } from '../connectors/registry.js';
 import { documentMeta } from '../connectors/store.js';
 import { extractTitleAuthor, scoreCandidate, type Candidate } from '../connectors/matching.js';
 import { nowSeconds } from './sync.js';
-import { cacheKey, hardcoverBook, type HardcoverBook } from './hardcover-catalog.js';
+import { cacheKey, cachedHardcoverBook, hardcoverBook, type HardcoverBook } from './hardcover-catalog.js';
 import { keepManual } from './manual-details.js';
 
 /**
@@ -146,6 +146,10 @@ async function amazonPages(http: HttpTransport, title: string, author: string, k
   }
 }
 
+/** A title without bracketed edition notes or a trailing ": A Novel". */
+export const editionless = (title: string) =>
+  title.replace(/\s*[[(][^\])]*[\])]/g, '').replace(/:\s*a novel\s*$/i, '').trim() || title;
+
 export async function findBookInfo(
   http: HttpTransport,
   title: string,
@@ -155,7 +159,14 @@ export async function findBookInfo(
 ): Promise<BookInfo> {
   const [apple, ol] = await Promise.all([safe(itunes(http, title, author)), safe(openLibrary(http, title, author))]);
   // `known` (Hardcover's) fills in after the free sources, before the keyed/paid ones.
-  const cover = best(title, author, apple, (c) => c.url)?.url ?? best(title, author, ol, (c) => c.url)?.url ?? known.cover ?? null;
+  let cover = best(title, author, apple, (c) => c.url)?.url ?? best(title, author, ol, (c) => c.url)?.url ?? null;
+  // Edition text ("Bel Canto [Movie Tie-In]: A Novel") hides a book from the searches.
+  const plain = editionless(title);
+  if (!cover && !known.cover && plain !== title) {
+    const [apple2, ol2] = await Promise.all([safe(itunes(http, plain, author)), safe(openLibrary(http, plain, author))]);
+    cover = best(plain, author, apple2, (c) => c.url)?.url ?? best(plain, author, ol2, (c) => c.url)?.url ?? null;
+  }
+  cover ??= known.cover ?? null;
   let pages = known.pages ?? best(title, author, ol, (c) => c.pages)?.pages ?? null;
   // A series prefix ("Game Changers 6: The Long Game") hides the book from Open Library.
   const short = title.split(': ').slice(1).join(': ');
@@ -243,9 +254,9 @@ export async function documentInfo(
   { hardcover = false }: { hardcover?: boolean } = {}
 ): Promise<BookInfo> {
   const row = db
-    .prepare('SELECT cover_url, page_count, cover_checked_at, hc_checked_at FROM documents WHERE user_id = ? AND document = ?')
+    .prepare('SELECT cover_url, page_count, cover_checked_at, hc_checked_at, hc_id FROM documents WHERE user_id = ? AND document = ?')
     .get(userId, document) as
-    | { cover_url: string | null; page_count: number | null; cover_checked_at: number | null; hc_checked_at: number | null }
+    | { cover_url: string | null; page_count: number | null; cover_checked_at: number | null; hc_checked_at: number | null; hc_id: string | null }
     | undefined;
   if (!row) return { cover: null, pages: null }; // no metadata, nothing to search on
   const want = extractTitleAuthor(documentMeta(db, userId, document));
@@ -257,11 +268,18 @@ export async function documentInfo(
       hc = found;
     }
   }
-  // Hardcover's print page count is the stats source of truth, even when the
-  // cover lookup below is still cached.
+  // A book matched earlier: its Hardcover details are in the cache, no lookup needed.
+  if (!hc && want && row.hc_id) hc = cachedHardcoverBook(db, want.title, want.author);
+  // Hardcover's print page count is the stats source of truth, and its cover fills
+  // a gap the free sources left, even when the cover lookup below is still cached
+  // (it often ran before the throttled Hardcover lookup did).
   if (!row.page_count && hc?.pages) {
     row.page_count = hc.pages;
     db.prepare('UPDATE documents SET page_count = ? WHERE user_id = ? AND document = ?').run(hc.pages, userId, document);
+  }
+  if (!row.cover_url && hc?.cover) {
+    row.cover_url = hc.cover;
+    db.prepare('UPDATE documents SET cover_url = ? WHERE user_id = ? AND document = ?').run(hc.cover, userId, document);
   }
   const cached = { cover: row.cover_url, pages: row.page_count };
   if ((row.cover_url && row.page_count) || (row.cover_checked_at && nowSeconds() - row.cover_checked_at < RETRY_AFTER)) {
