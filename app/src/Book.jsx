@@ -472,9 +472,6 @@ function DatesSheet({ session, book, activity: a, onDone, onClose }) {
   )
 }
 
-// Title and author by hand, for books the reader synced with a title the lookups can't
-// find (say, a translation). The edit sticks over later device syncs, and the cover,
-// page count and catalog details are looked up again with it.
 // Lists Hardcover fills in, with the server's limits (API.md: PUT /documents/{document}/info).
 const LIST_FIELDS = [
   { key: 'genres', label: 'Genres', max: 10, placeholder: 'Add a genre' },
@@ -533,8 +530,9 @@ function ChipField({ label, items, onChange, max, placeholder }) {
 
 const sameList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
 
-// Every detail but the cover and reading dates, in one form. Only changed fields are sent, and an emptied list
-// or description is saved empty.
+// Every detail but the cover and reading dates, in one form. Only changed fields are sent: an emptied list or
+// description is saved empty, while a cleared series, year or page count goes back to the lookup. A new title
+// sticks over later device syncs and the cover and catalog details are looked up again with it.
 function EditDetailsSheet({ session, book, onDone, onClose }) {
   const [about] = useLoad(() => api.about(session, book.document), [book.document], `about ${book.document}`)
   const [title, setTitle] = useState(book.title ?? '')
@@ -564,7 +562,7 @@ function EditDetailsSheet({ session, book, onDone, onClose }) {
     if (description !== null && description.trim() !== (about?.description ?? '')) patch.description = description.trim()
     if (series.trim() !== (book.series ?? '') || n !== (book.series_position ?? null)) Object.assign(patch, series.trim() ? { series: series.trim(), series_position: n } : { series: null })
     if (y !== (book.release_year ?? null)) patch.release_year = y
-    if (p !== (book.page_count ?? null) && p !== null) patch.page_count = p
+    if (p !== (book.page_count ?? null)) patch.page_count = p
     if (!Object.keys(patch).length) return onClose()
 
     setSaving(true)
@@ -625,8 +623,9 @@ function EditDetailsSheet({ session, book, onDone, onClose }) {
   )
 }
 
-function BookMenu({ session, book, books, activity, onChange, open, setOpen }) {
+function BookMenu({ session, book, books, activity, onChange }) {
   const [action, setAction] = useState(null)
+  const [open, setOpen] = useState(null) // 'edit' | 'cover' | 'dates' | 'merge'
   const [menu, setMenu] = useState(false)
   useNativeButton('more', { sfSymbol: 'ellipsis', anchor: 'topTrailing' }, () => setMenu((m) => !m))
   const dupes = books.filter((b) => looksLikeSame(book, b)).length
@@ -910,7 +909,6 @@ export default function Book({ session, book, books, activity, back = { href: '#
   const wide = useWide()
   const [revision, setRevision] = useState(0)
   const synced = () => { setRevision((n) => n + 1); onChange() }
-  const [open, setOpen] = useState(null) // the book menu's sheet: 'edit' | 'cover' | 'dates' | 'merge'
   useNativeBack(back.href)
   if (!book) return <p className="py-16 text-center text-sm text-stone-500">Book not found.</p>
   return (
@@ -922,7 +920,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
         >
           <ArrowLeft className="size-6" strokeWidth={2} /> {back.label}
         </a>
-        <BookMenu key={book.document} session={session} book={book} books={books} activity={activity} onChange={synced} open={open} setOpen={setOpen} />
+        <BookMenu key={book.document} session={session} book={book} books={books} activity={activity} onChange={synced} />
       </div>
       {/* One column at every size: the book up top, its cards two-up on wide screens, clippings below. */}
       <div className="md:mt-4">
