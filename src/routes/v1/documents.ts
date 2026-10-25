@@ -5,12 +5,13 @@ import { isValidDocument, languageTag } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
 import { coverCandidates, documentInfo } from '../../models/cover.js';
-import { nextAfter, seriesBooks } from '../../models/hardcover-catalog.js';
+import { nextAfter, seriesBooks, tidy } from '../../models/hardcover-catalog.js';
 import { extractTitleAuthor } from '../../connectors/matching.js';
 import { documentMeta } from '../../connectors/store.js';
 import { fanOutProgress } from '../../connectors/fanout.js';
 import type { HttpTransport } from '../../connectors/types.js';
 import { fetchTransport } from '../../connectors/registry.js';
+import { MANUAL_DETAILS, type ManualFlag } from '../../models/manual-details.js';
 
 const MAX_BATCH = 50;
 export const STATUSES = ['reading', 'finished', 'dnf', 'paused'] as const;
@@ -290,17 +291,52 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const title = text(o.title);
     const author = text(o.author);
     const language = o.language === undefined || o.language === null ? o.language : languageTag(o.language);
-    // Same shape Hardcover's genres are stored in: a short list of short names.
-    const genres = Array.isArray(o.genres) ? [...new Set(o.genres.map(text))] : o.genres;
-    const genresOk =
-      genres === undefined || genres === null ||
-      (Array.isArray(genres) && genres.length <= 10 && genres.every((g) => typeof g === 'string' && g.length > 0 && g.length <= 64));
+    // Genres, moods and content warnings: a short list of short names, spelled the way Hardcover's are stored (tidy():
+    // trimmed, de-duplicated ignoring case, first letter capitalized), so the two sources count as one.
+    // null clears a list; undefined leaves it alone.
+    const tags = (v: unknown, max: number) => {
+      if (v === undefined || v === null) return { list: v as null | undefined, ok: true };
+      const ok = Array.isArray(v) &&
+        v.every((g) => typeof g === 'string' && g.trim().length > 0 && g.trim().length <= 64) && tidy(v, max + 1).length <= max;
+      return { list: ok ? tidy(v, max) : undefined, ok };
+    };
+    // Each detail set by hand (MANUAL_DETAILS): its columns' values, or null to hand it back to Hardcover.
+    const details = new Map<ManualFlag, (string | number | null)[] | null>();
+    let detailsOk = true;
+    const take = (flag: ManualFlag, raw: unknown, parse: (v: unknown) => (string | number | null)[] | undefined) => {
+      if (raw === undefined) return;
+      const values = raw === null ? null : parse(raw);
+      if (values === undefined) detailsOk = false;
+      else details.set(flag, values);
+    };
+    const list = (max: number) => (v: unknown) => {
+      const { list: l, ok } = tags(v, max);
+      return ok && l ? [l.length ? JSON.stringify(l) : null] : undefined;
+    };
+    take('genres', o.genres, list(10));
+    take('moods', o.moods, list(12));
+    take('content_warnings', o.content_warnings, list(12));
+    take('description', o.description, (v) => {
+      // Not text(): its 500-character cut would shorten a description silently.
+      const d = typeof v === 'string' ? v.trim() : v;
+      return typeof d === 'string' && d.length <= 6000 ? [d || null] : undefined;
+    });
+    take('release_year', o.release_year, (v) => (Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 9999 ? [v as number] : undefined));
+    // A series name, with its number when given; the number alone is not taken, so it never lands on a
+    // series Hardcover named.
+    take('series', o.series, (v) => {
+      const name = text(v);
+      const pos = o.series_position;
+      const posOk = pos === undefined || pos === null || (typeof pos === 'number' && Number.isFinite(pos) && pos >= 0 && pos <= 10000);
+      return typeof name === 'string' && name.length > 0 && name.length <= 200 && posOk ? [name, (pos as number | undefined) ?? null, null] : undefined;
+    });
+    if (o.series_position !== undefined && o.series === undefined) detailsOk = false;
     // A title is required once edited; an empty author means "no author".
     const titleOk = title === undefined || (typeof title === 'string' && title.length > 0);
     const authorOk = author === undefined || typeof author === 'string';
     const coverOk = cover === undefined || cover === null || (typeof cover === 'string' && /^https?:\/\/\S{1,2000}$/.test(cover));
     const pagesOk = pages === undefined || pages === null || (Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= 100000);
-    if (!isValidDocument(param) || !coverOk || !pagesOk || !titleOk || !authorOk || !genresOk || (language === null && o.language !== null)) {
+    if (!isValidDocument(param) || !coverOk || !pagesOk || !titleOk || !authorOk || !detailsOk || (language === null && o.language !== null)) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const user = c.get('user');
@@ -316,13 +352,16 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (language !== undefined) {
       db.prepare('UPDATE documents SET language = ? WHERE user_id = ? AND document = ?').run(language as string | null, user.id, document);
     }
-    if (genres !== undefined) {
-      const list = genres as string[] | null;
-      // Clearing hands genres back to Hardcover: the next enrichment pass looks the book up again.
+    for (const d of MANUAL_DETAILS) {
+      if (!details.has(d.flag)) continue;
+      const values = details.get(d.flag) ?? null;
+      // Set here, it sticks over Hardcover's; cleared, it is handed back: the next enrichment pass looks the
+      // book up again. Column names come from MANUAL_DETAILS, never from the request.
       db.prepare(
-        `UPDATE documents SET genres = ?, genres_manual = ?, hc_checked_at = CASE WHEN ? THEN hc_checked_at ELSE NULL END
+        `UPDATE documents SET ${d.columns.map((c) => `${c} = ?`).join(', ')}, ${d.flag}_manual = ?,
+           hc_checked_at = CASE WHEN ? THEN hc_checked_at ELSE NULL END
          WHERE user_id = ? AND document = ?`
-      ).run(list?.length ? JSON.stringify(list) : null, list ? 1 : 0, list ? 1 : 0, user.id, document);
+      ).run(...(values ?? d.columns.map(() => null)), values ? 1 : 0, values ? 1 : 0, user.id, document);
     }
     if (title !== undefined || author !== undefined) {
       // New title/author: everything found with the old one is looked up again
@@ -335,11 +374,18 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       ).run((title as string | undefined) ?? null, author !== undefined ? 1 : 0, (author as string | undefined) ?? '', user.id, document);
       db.prepare("DELETE FROM connector_matches WHERE user_id = ? AND document = ? AND source IN ('auto', 'none')").run(user.id, document);
     }
-    const row = db.prepare('SELECT cover_url, page_count, title, author, language, genres FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as {
+    const row = db.prepare(
+      `SELECT cover_url, page_count, title, author, language, genres, moods, content_warnings, description, series,
+         series_position, release_year FROM documents WHERE user_id = ? AND document = ?`
+    ).get(user.id, document) as {
       cover_url: string | null; page_count: number | null; title: string | null; author: string | null; language: string | null; genres: string | null;
+      moods: string | null; content_warnings: string | null; description: string | null; series: string | null;
+      series_position: number | null; release_year: number | null;
     };
+    const parsed = (v: string | null) => (v ? (JSON.parse(v) as string[]) : []);
     return c.json({ document, cover_url: row.cover_url, page_count: row.page_count, title: row.title, author: row.author, language: row.language,
-      genres: row.genres ? (JSON.parse(row.genres) as string[]) : [] });
+      genres: parsed(row.genres), moods: parsed(row.moods), content_warnings: parsed(row.content_warnings), description: row.description,
+      series: row.series, series_position: row.series_position, release_year: row.release_year });
   });
 
   app.get('/documents', (c) => {

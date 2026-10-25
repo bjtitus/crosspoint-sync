@@ -2,6 +2,7 @@ import { withTransaction, type DB } from '../db/db.js';
 import { nextChangeSeq } from './changes.js';
 import { md5Hex } from '../auth/password.js';
 import { autoUnpause } from './pause.js';
+import { MANUAL_COLUMNS, mergeManualSql } from './manual-details.js';
 
 /**
  * Manual document merges. The kosync document key is client-computed and
@@ -147,9 +148,10 @@ export function mergeDocuments(
     db.prepare('UPDATE progress_log SET document = ? WHERE user_id = ? AND document = ?').run(into, userId, from);
 
     // documents: canonical metadata wins, alias fills the gaps.
+    const manual = MANUAL_COLUMNS.join(', ');
     db.prepare(
-      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, genres, genres_manual, updated_at)
-       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, genres, genres_manual, ? FROM documents WHERE user_id = ? AND document = ?
+      `INSERT INTO documents (user_id, document, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, ${manual}, updated_at)
+       SELECT user_id, ?, title, author, filename, filesize, status, status_at, pause_reason, start_date, finished_date, cover_url, page_count, language, ${manual}, ? FROM documents WHERE user_id = ? AND document = ?
        ON CONFLICT(user_id, document) DO UPDATE SET
          title = COALESCE(documents.title, excluded.title),
          author = COALESCE(documents.author, excluded.author),
@@ -163,10 +165,7 @@ export function mergeDocuments(
          cover_url = COALESCE(documents.cover_url, excluded.cover_url),
          page_count = COALESCE(documents.page_count, excluded.page_count),
          language = COALESCE(documents.language, excluded.language),
-         -- Genres set by hand beat Hardcover's; otherwise the kept document's win.
-         genres = CASE WHEN excluded.genres_manual AND NOT documents.genres_manual THEN excluded.genres
-                       ELSE COALESCE(documents.genres, excluded.genres) END,
-         genres_manual = MAX(documents.genres_manual, excluded.genres_manual),
+         ${mergeManualSql()},
          updated_at = excluded.updated_at`
     ).run(into, now, userId, from);
     db.prepare('DELETE FROM documents WHERE user_id = ? AND document = ?').run(userId, from);

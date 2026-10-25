@@ -67,7 +67,7 @@ export function resetHardcoverThrottle(): void {
 }
 
 // Hardcover tags are user-entered: tidy case and drop duplicates ("Dark"/"dark").
-function tidy(list: unknown, max: number): string[] {
+export function tidy(list: unknown, max: number): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const v of Array.isArray(list) ? list : []) {
