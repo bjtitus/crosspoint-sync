@@ -66,6 +66,13 @@ const CROPS = {
   iphone: { chart: [48, 1511, 1224, 690], quote: [45, 586, 1230, 570], device: [48, 943, 1226, 245], conn: [48, 448, 1226, 450] },
   ipad: { chart: [600, 786, 1400, 400], quote: [604, 296, 1300, 280], device: [607, 512, 650, 165], conn: [607, 871, 666, 289], svc: [607, 1048, 1155, 298] },
 }
+// Whole UI cards for the App Store header and search images: [iphone screen, crop in capture pixels].
+const CARDS = {
+  book: ['library', [44, 972, 1232, 612]],
+  quote: ['clippings', [4, 424, 1312, 752]],
+  chart: ['stats', [44, 1442, 1232, 680]],
+  services: ['settings', [46, 446, 1230, 454]],
+}
 const CAPTIONS = {
   library: ['Your reading, everywhere', 'Every book you’re reading, in one place'],
   book: ['Pick up where you left off', 'Progress synced from your CrossPoint reader'],
@@ -122,6 +129,19 @@ try {
   }
   const icon = `data:image/svg+xml;base64,${readFileSync(path.join(APP, 'src-tauri/icons/icon-ios.svg')).toString('base64')}`
   await frame(browser, 1024, 500, { layout: 'feature', dev: 'phone', kick: 'Your reading, everywhere', head: 'CrossPoint Sync', shot: raw('phone-library'), icon }, 'feature-graphic.jpg')
+  // App Store Creative Assets (iOS 27+): product page header and search result card, PNG without alpha.
+  const cards = Object.fromEntries(Object.entries(CARDS).map(([k, [screen, crop]]) => [k, [raw(`iphone-${screen}`), crop]]))
+  await frame(browser, 1920, 823, { layout: 'header', kick: 'one place for your reading', head: 'Sync your CrossPoint Reader with all your favorite services', cards }, 'appstore-header.png', 2)
+  await frame(browser, 1920, 1280, { layout: 'search', kick: 'from your CrossPoint Reader', head: 'Your progress, highlights and stats on your phone', cards }, 'appstore-search.png', 2)
+  // Second option: the services it syncs to (Spotify is beta and Kindle hidden, so both stay out).
+  const logos = [['hardcover', 'Hardcover'], ['readwise', 'Readwise'], ['bookfusion', 'BookFusion'], ['kosync', 'KOReader'],
+    ['microblog', 'Micro.blog'], ['audiobookshelf', 'Audiobookshelf'], ['jellyfin', 'Jellyfin'], ['bookorbit', 'BookOrbit'], ['seekquel', 'Seekquel']]
+    .map(([id, name]) => ({ name, src: pathToFileURL(path.join(APP, '..', 'assets/icons', `${id}.png`)).href }))
+  await frame(browser, 1920, 823, { layout: 'header-logos', kick: 'one place for your reading', head: 'Sync your CrossPoint Reader with all your favorite services', logos }, 'appstore-header-logos.png', 2)
+  await frame(browser, 1920, 1280, { layout: 'search-logos', kick: 'one place for your reading', head: 'Sync your CrossPoint Reader with all your favorite services', logos }, 'appstore-search-logos.png', 2)
+  for (const name of ['appstore-header.png', 'appstore-search.png', 'appstore-header-logos.png', 'appstore-search-logos.png']) {
+    execFileSync('magick', [path.join(OUT, name), '-alpha', 'off', `PNG24:${path.join(OUT, name)}`])
+  }
   await renderIcon(browser, icon)
   console.log(`Store assets written to ${OUT}`)
 } finally {

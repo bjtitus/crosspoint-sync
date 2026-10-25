@@ -35,6 +35,15 @@ describe('widget account data', () => {
     expect(cover).toBe('')
   })
 
+  it('hands the widget the session to refresh with, and drops it on sign-out', async () => {
+    const session = { server: 'https://sync.test', username: 'reader', key: 'k', extra: 'not sent' }
+    await updateWidget({ session, books: [{ ...book, cover_url: 'https://covers.test/a.jpg' }] })
+    expect(data()).toMatchObject({ session: { server: 'https://sync.test', username: 'reader', key: 'k' }, cover_url: 'https://covers.test/a.jpg' })
+    expect(data().session).not.toHaveProperty('extra')
+    await clearWidget()
+    expect(data()).not.toHaveProperty('session')
+  })
+
   it('ignores a cover download that completes after sign-out', async () => {
     let resolve
     http.mockReturnValueOnce(new Promise((r) => { resolve = r }))

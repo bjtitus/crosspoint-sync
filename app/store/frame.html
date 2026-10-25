@@ -1,7 +1,8 @@
 <!doctype html>
 <!-- One store image: a caption plus a real app screenshot in a device frame,
      optionally with a crop of that screenshot enlarged as a callout.
-     make-assets.mjs opens this with ?spec={layout, dev, shot, crop, kick, head, icon}. -->
+     make-assets.mjs opens this with ?spec={layout, dev, shot, cards, crop, kick, head, icon}.
+     cards: {name: [screenshot, crop]}, standalone UI cards for the App Store header and search layouts. -->
 <html><head><meta charset="utf-8">
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Inter:wght@400;500&family=Lora:wght@600&display=block" rel="stylesheet">
 <style>
@@ -41,6 +42,10 @@ h1 { font-family:Lora; font-weight:600; font-size:var(--h,76px); line-height:1.1
 .ipad .home { width:calc(var(--U) * 320) }
 .btn { position:absolute; background:#2c2c2e; border-radius:calc(var(--U) * 2) }
 .cam { position:absolute; width:calc(var(--U) * 7); height:calc(var(--U) * 7); border-radius:50%; background:#1c1f24 }
+.logo { position:absolute; width:var(--s); text-align:center; color:#dbe7e1; font-size:calc(var(--s) * .17); font-weight:500 }
+.logo img { width:var(--s); height:var(--s); border-radius:22%; display:block; margin:0 auto calc(var(--s) * .12);
+  box-shadow:0 18px 40px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.12) }
+.lines { position:absolute; inset:0 }
 .feature { position:absolute; left:72px; top:0; bottom:0; width:520px; display:flex; flex-direction:column; justify-content:center; color:#fff }
 .feature img { width:84px; height:84px; border-radius:20px; box-shadow:0 0 0 1px rgba(255,255,255,.2) }
 .feature p { margin-top:14px; font-size:21px; line-height:1.45; color:rgba(255,255,255,.75); max-width:440px }
@@ -52,7 +57,7 @@ const BIG = '--k:80px;--h:100px'
 const FLAT = 'border-top-left-radius:0;border-top-right-radius:0'
 const cap = (style, cls = '') => `<div class="cap ${cls}" style="${style}"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
 // height: show only the top of the screen (a device running off the canvas).
-const dev = (style, height) => IOS ? iosDev(style, height) : `<div class="dev" style="${D};${style}"><div class="scr"${height ? ` style="height:${height}px"` : ''}><img src="${s.shot}"></div></div>`
+const dev = (style, height, src = s.shot) => IOS ? iosDev(style, height, src) : `<div class="dev" style="${D};${style}"><div class="scr"${height ? ` style="height:${height}px"` : ''}><img src="${src}"></div></div>`
 // iPhone 6.9" / iPad 13": status bar, Dynamic Island, home indicator, side buttons. Widths in points, bezel included.
 const IOS = { iphone: 460, ipad: 1088 }[s.dev]
 const ICONS = '<span class="ic">'
@@ -70,14 +75,17 @@ const BUTTONS = {
     + `<div class="btn" style="right:${u(-4)};top:${u(175)};width:${u(4)};height:${u(55)}"></div>`
     + `<div class="cam" style="right:${u(10.5)};top:50%"></div>`,
 }
-function iosDev(style, height) {
+function iosDev(style, height, src) {
   const u = (n) => `calc(var(--U) * ${n})`
   const bar = s.dev === 'iphone' ? `<div class="sbar"><span>9:41</span><span></span>${ICONS}</div><div class="island"></div>`
     : `<div class="sbar"><span>9:41&ensp;Mon Oct 19</span><span></span>${ICONS}</div>`
   // height is a cap: a shorter capture shows whole (the home indicator is hidden below if it's cut off).
-  return `<div class="dev ios ${s.dev}" style="${style}"><div class="scr"${height ? ` style="max-height:${height}px"` : ''}><img src="${s.shot}">${bar}<div class="home"></div></div>${BUTTONS[s.dev](u)}</div>`
+  return `<div class="dev ios ${s.dev}" style="${style}"><div class="scr"${height ? ` style="max-height:${height}px"` : ''}><img src="${src}">${bar}<div class="home"></div></div>${BUTTONS[s.dev](u)}</div>`
 }
-const call = (style) => `<div class="call" style="${style};aspect-ratio:${s.crop[2]}/${s.crop[3]}"><img src="${s.shot}"></div>`
+const call = (style, src = s.shot, crop = s.crop) =>
+  `<div class="call" data-crop="${crop}" style="${style};aspect-ratio:${crop[2]}/${crop[3]}"><img src="${src}"></div>`
+// A standalone UI card: one of spec.cards, {name: [screenshot, crop]}.
+const card = (name, style) => call(style, ...s.cards[name])
 const paper = () => (document.body.className = 'paper', '')
 // Extra canvas height over the 1920 these were drawn for (iOS canvases differ); 0 on Android.
 const X = innerHeight - 1920
@@ -100,6 +108,32 @@ const layouts = {
   'l-right': () => dev('left:-160px;top:200px;width:1700px') + cap(`left:1680px;right:auto;top:480px;width:760px;${BIG}`, 'left'),
   'l-top': () => cap(`left:300px;right:300px;top:110px;${BIG}`) + dev('left:260px;top:440px;width:1700px') + call('left:1180px;top:820px;width:1300px;transform:rotate(-2.5deg)'),
   'l-paper': () => paper() + cap(`left:150px;right:auto;top:200px;width:820px;${BIG}`, 'left') + dev('left:1060px;top:240px;width:1600px;transform:rotate(-5deg)') + call('left:150px;top:820px;width:1100px;transform:rotate(1.5deg)'),
+  // App Store Creative Assets, drawn at 2x. Product page header 1920x823 (3840x1646): Apple keeps
+  // only a centered 823x330 safe on every device, so the caption sits there with real UI cards
+  // around it. Search result card 1920x1280 (3840x2560): caption inside the centered 1084x515
+  // safe area (x 418-1502, y 382-897). Every card stays whole inside the canvas.
+  header: () => card('book', 'left:40px;top:60px;width:500px;transform:rotate(-3deg)')
+    + card('quote', 'left:50px;top:400px;width:480px;transform:rotate(2deg)')
+    + card('chart', 'left:1380px;top:50px;width:500px;transform:rotate(3deg)')
+    + card('services', 'left:1390px;top:440px;width:490px;transform:rotate(-2deg)')
+    + `<div class="cap" style="left:560px;right:560px;top:262px;--k:48px;--h:62px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`,
+  search: () => `<div class="cap left" style="left:440px;right:auto;top:420px;width:580px;--k:52px;--h:70px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
+    + card('book', 'left:1030px;top:190px;width:820px;transform:rotate(-2deg)')
+    + card('chart', 'left:1040px;top:640px;width:820px;transform:rotate(2deg)'),
+  // The same two placements with the services CrossPoint Sync syncs to (spec.logos: [{src, name}]).
+  'header-logos': () => {
+    const at = [[90, 70], [330, 150], [130, 330], [380, 420], [110, 590], [1450, 90], [1700, 170], [1480, 400], [1720, 520]]
+    const S = 104
+    const lines = at.map(([x, y]) => [x + S / 2, y + S / 2]).map(([x, y]) => {
+      const tx = x < 960 ? 600 : 1320
+      return `<path d="M${x} ${y} Q ${(x + tx) / 2} ${(y + 411) / 2 + (y < 411 ? -60 : 60)} ${tx} 411" />`
+    }).join('')
+    return `<svg class="lines" viewBox="0 0 1920 823" fill="none" stroke="rgba(179,207,194,.28)" stroke-width="2" stroke-dasharray="2 9" stroke-linecap="round">${lines}</svg>`
+      + s.logos.map((l, i) => `<div class="logo" style="--s:${S}px;left:${at[i][0]}px;top:${at[i][1]}px"><img src="${l.src}">${l.name}</div>`).join('')
+      + `<div class="cap" style="left:560px;right:560px;top:262px;--k:48px;--h:62px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
+  },
+  'search-logos': () => `<div class="cap left" style="left:440px;right:auto;top:420px;width:580px;--k:52px;--h:70px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
+    + s.logos.map((l, i) => `<div class="logo" style="--s:150px;left:${1060 + (i % 3) * 270}px;top:${235 + Math.floor(i / 3) * 290}px"><img src="${l.src}">${l.name}</div>`).join(''),
   // Feature graphic, 1024x500
   feature: () => `<div class="feature"><img src="${s.icon}"><div class="kick" style="--k:40px;margin-top:22px;transform-origin:left">${s.kick}</div>
     <h1 style="--h:64px;line-height:1.05;margin-top:0">${s.head}</h1><p>Progress, highlights and reading stats from your CrossPoint e-reader, on your phone.</p></div>`
@@ -113,7 +147,7 @@ await Promise.all([...document.images].map((i) => i.decode()))
 for (const scr of document.querySelectorAll('.ios .scr')) if (scr.clientHeight < scr.firstChild.clientHeight) scr.querySelector('.home').remove()
 // Position each callout's screenshot so only its crop shows, enlarged to the callout's width.
 for (const box of document.querySelectorAll('.call')) {
-  const [x, y, w] = s.crop, img = box.firstChild, k = box.clientWidth / w
+  const [x, y, w] = box.dataset.crop.split(',').map(Number), img = box.firstChild, k = box.clientWidth / w
   Object.assign(img.style, { width: `${img.naturalWidth * k}px`, left: `${-x * k}px`, top: `${-y * k}px` })
 }
 document.body.dataset.ready = '1'

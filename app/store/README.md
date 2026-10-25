@@ -18,6 +18,9 @@ Output:
 | `iphone-6.9in-*.png` | 1320x2868 | App Store iPhone 6.9" |
 | `ipad-13in-*.png` | 2064x2752 | App Store iPad 13" |
 | `feature-graphic.jpg` | 1024x500 | Play feature graphic |
+| `appstore-header.png` | 3840x1646 | App Store product page header (iOS 27+) |
+| `appstore-search.png` | 3840x2560 | App Store search result card (iOS 27+) |
+| `appstore-*-logos.png` | same | The same two placements with the services it syncs to |
 | `icon-512.png` | 512x512 | Play app icon |
 
 It needs Google Chrome, ImageMagick (`magick`), `npm install` already run in the repo root and in `app/`, and ports 1430, 8798 and 8799 free. A run takes about two minutes.
@@ -35,5 +38,5 @@ Everything shown is the real UI with sample data. Spotify is filtered out of the
 
 - Captions and which screen uses which layout: `CAPTIONS` and `SETS` in `make-assets.mjs`.
 - Layouts: `layouts` in `frame.html`.
-- Callout crops are pixel rectangles in the captures (`CROPS`). If the app's layout moves, run with `KEEP_RAW=1` to keep the raw captures and re-measure the crops against them.
+- Callout crops are pixel rectangles in the captures (`CROPS`), and so are the App Store header and search cards (`CARDS`). If the app's layout moves, run with `KEEP_RAW=1` to keep the raw captures and re-measure the crops against them.
 - Sample data: `BOOKS` and `CLIPPINGS`.

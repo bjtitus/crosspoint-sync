@@ -36,7 +36,9 @@ async function coverBase64(url) {
   }
 }
 
-export async function updateWidget({ books, summary, activity }) {
+// The session goes along so the widget can refresh from the server on its own
+// (CrossPointWidget.swift, ReadingWidget.kt); signing out clears it.
+export async function updateWidget({ session, books, summary, activity }) {
   if (!books || !(window.CrossPointWidget || isApp)) return
   const current = books.find((b) => b.status === 'reading')
   const year = new Date().getFullYear()
@@ -49,7 +51,9 @@ export async function updateWidget({ books, summary, activity }) {
   const data = current
     ? { label: 'CONTINUE READING', title: current.title || current.filename, author: current.author ?? '', percent: Math.round(current.percentage * 100), stats }
     : { label: 'CROSSPOINT SYNC', title: 'Nothing in progress', author: '', percent: -1, stats }
-  const key = JSON.stringify([data, current?.cover_url])
+  if (session) data.session = { server: session.server, username: session.username, key: session.key }
+  data.cover_url = current?.cover_url ?? null
+  const key = JSON.stringify(data)
   if (key === last) return
   last = key
   const currentVersion = ++version

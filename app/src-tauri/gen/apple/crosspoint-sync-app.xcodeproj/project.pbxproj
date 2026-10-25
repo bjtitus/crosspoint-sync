@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		05558E78087CE893FD133EED /* WidgetReload.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FDA312FF333FEE325F3784 /* WidgetReload.swift */; };
 		07E120DC37D4E3BA35660834 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1C1D61425D6C89B023A68699 /* WebKit.framework */; };
 		0D22C69FE6169D6661235690 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BECC0ABE484B2047607C4F0A /* SwiftUI.framework */; };
 		184305EE28170BE91A0DA0D7 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = FEFB9FFA8A213DFAD642AEFC /* LaunchScreen.storyboard */; };
@@ -21,6 +22,7 @@
 		C5448F553016109426054C67 /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D14F66F0D47B664F9709AE4F /* libapp.a */; };
 		CEA14FCBC23E088D806332E2 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BEF7345547BE54CBD0CAA946 /* UIKit.framework */; };
 		E5C50AE36BA05B191B1F4EB0 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7CC754790240CD99815BE1B6 /* Security.framework */; };
+		E952F1320553223057A59239 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FE54F751F09F6D338C764211 /* WidgetKit.framework */; };
 		F507E6B34A0632CF9017FFF2 /* CrossPointWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB2A4F2B0B619285749721A7 /* CrossPointWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F5379C59BD1403E2BDA6098F /* assets in Resources */ = {isa = PBXBuildFile; fileRef = EFAC7081BE0965C9641C74F2 /* assets */; };
 /* End PBXBuildFile section */
@@ -75,10 +77,10 @@
 		BDA631634A4254C1AABE933C /* parse_v1.rs */ = {isa = PBXFileReference; path = parse_v1.rs; sourceTree = "<group>"; };
 		BECC0ABE484B2047607C4F0A /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		BEF7345547BE54CBD0CAA946 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		C0FDA312FF333FEE325F3784 /* WidgetReload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetReload.swift; sourceTree = "<group>"; };
 		D14F66F0D47B664F9709AE4F /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		DB9EA204EB38B3A7B57FFDE6 /* books.rs */ = {isa = PBXFileReference; path = books.rs; sourceTree = "<group>"; };
 		DEB175945B16E108EDD85D78 /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
-		ED7B9C55E7A2791B84DE7114 /* optimizer.rs */ = {isa = PBXFileReference; path = optimizer.rs; sourceTree = "<group>"; };
 		EE38B36BD152DF32937EF8A3 /* crosspoint-sync-app_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "crosspoint-sync-app_iOS.entitlements"; sourceTree = "<group>"; };
 		EFAC7081BE0965C9641C74F2 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		F77ADE8FD7A24CA12EFD9819 /* parse_v2.rs */ = {isa = PBXFileReference; path = parse_v2.rs; sourceTree = "<group>"; };
@@ -108,6 +110,7 @@
 				E5C50AE36BA05B191B1F4EB0 /* Security.framework in Frameworks */,
 				CEA14FCBC23E088D806332E2 /* UIKit.framework in Frameworks */,
 				07E120DC37D4E3BA35660834 /* WebKit.framework in Frameworks */,
+				E952F1320553223057A59239 /* WidgetKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -129,7 +132,6 @@
 				8C6F962704EE8ACE50636956 /* lib.rs */,
 				4AE2C3E46EF866376181162A /* main.rs */,
 				75F208D74C3164B18C8AFAE5 /* mdns.rs */,
-				ED7B9C55E7A2791B84DE7114 /* optimizer.rs */,
 				725351A937E063D1D025CF2A /* refresh.rs */,
 				6A1455ECBA39E1ACC7E634A5 /* widget.rs */,
 				C1BB4D8BDB160ADDCC937AC4 /* opds */,
@@ -151,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				917F15BCA5CFDD43F04EE308 /* main.mm */,
+				C0FDA312FF333FEE325F3784 /* WidgetReload.swift */,
 				967C288423B4F5D0AD41A6A9 /* bindings */,
 			);
 			path = "crosspoint-sync-app";
@@ -235,14 +238,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_7A0C2686-DC17-41D7-BBED-ECE13CB7ADC2" /* x86_64 */ = {
+		"TEMP_3868F0E2-1AF1-412D-9A61-2D796E0DBF7A" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = x86_64;
 			sourceTree = "<group>";
 		};
-		"TEMP_E19E588B-C3F3-4881-B2F9-8074C8036D9C" /* arm64 */ = {
+		"TEMP_AA86D63A-8262-425B-923E-4F2D4F591BFA" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -377,6 +380,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				05558E78087CE893FD133EED /* WidgetReload.swift in Sources */,
 				9CC5FA4D3B3EEAB970E0A4DE /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -462,6 +466,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.crosspointreader.sync;
 				PRODUCT_NAME = "CrossPoint Sync";
 				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
 				DEVELOPMENT_TEAM = "96247QW4R8";
@@ -494,6 +499,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.crosspointreader.sync;
 				PRODUCT_NAME = "CrossPoint Sync";
 				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
 				DEVELOPMENT_TEAM = "96247QW4R8";

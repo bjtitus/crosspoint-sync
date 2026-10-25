@@ -16,10 +16,18 @@ pub fn update_widget(json: String, cover: String) -> Result<(), String> {
     } else {
       std::fs::write(cover_path, STANDARD.decode(cover).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     }
+    // Redraw now rather than at the widget's next scheduled refresh.
+    unsafe { crosspoint_reload_widgets() };
   }
   #[cfg(not(target_os = "ios"))]
   let _ = (json, cover);
   Ok(())
+}
+
+#[cfg(target_os = "ios")]
+extern "C" {
+  // gen/apple/Sources/crosspoint-sync-app/WidgetReload.swift
+  fn crosspoint_reload_widgets();
 }
 
 #[cfg(target_os = "ios")]

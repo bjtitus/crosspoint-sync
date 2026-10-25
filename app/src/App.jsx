@@ -335,8 +335,8 @@ function Home({ session, onSession, onLogout, theme }) {
     { retries: 2, reportRefreshErrors: true, initialUpdatedAt: () => cached.activityUpdatedAt(session) }
   )
   useEffect(() => {
-    updateWidget({ books, summary, activity })
-  }, [books, summary, activity])
+    updateWidget({ session, books, summary, activity })
+  }, [session, books, summary, activity])
 
   useEffect(() => {
     if (error?.status === 401 || activityError?.status === 401) onLogout()
