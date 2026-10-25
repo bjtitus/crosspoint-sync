@@ -555,12 +555,23 @@ function Service({ session, conn, onChange }) {
         </p>
       )}
       {conn.linked && conn.queue_errors?.length > 0 && (
-        <div role="alert" className="mt-2 space-y-1 text-xs text-red-700">
-          {conn.queue_errors.map((e) => (
-            <p key={`${e.kind}:${e.message}`}>
-              {e.count} {e.kind === 'clipping' ? 'clipping' : 'progress update'}{e.count === 1 ? '' : 's'}: {e.message}
-            </p>
-          ))}
+        <div className="mt-2 space-y-1 text-xs">
+          {conn.queue_errors.map((e) => {
+            const noun = { clipping: 'clipping', book: 'book', progress: 'progress update', finished: 'progress update' }[e.kind] ?? e.kind
+            const what = `${e.count} ${noun}${e.count === 1 ? '' : 's'}`
+            // Older servers send no titles.
+            const titles = e.titles?.length ? ` (${e.titles.slice(0, 3).join(', ')}${e.titles.length > 3 ? `, +${e.titles.length - 3} more` : ''})` : ''
+            // Not an error: the service just doesn't have that book.
+            return e.message === 'no book match' ? (
+              <p key={`${e.kind}:${e.message}`} className="text-stone-500">
+                {what} not found in {conn.name}{titles}
+              </p>
+            ) : (
+              <p key={`${e.kind}:${e.message}`} role="alert" className="text-red-700">
+                {what}: {e.message}{titles}
+              </p>
+            )
+          })}
         </div>
       )}
       {conn.linked && !needsRelink && conn.options && (

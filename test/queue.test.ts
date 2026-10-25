@@ -37,12 +37,23 @@ describe('connector queue', () => {
     }
     const rows = claimReady(db, 10, 100);
     for (const row of rows) markFailed(db, row, 'clipping has no position', false, 100);
-    expect(queueErrors(db, 1, 'bookorbit')).toEqual([{ kind: 'clipping', message: 'clipping has no position', count: 2 }]);
-    expect(queueErrors(db, 1, 'hardcover')).toEqual([]);
+    expect(queueErrors(db, 1, 'bookorbit', 100)).toEqual([{ kind: 'clipping', message: 'clipping has no position', count: 2, titles: ['Untitled book'] }]);
+    expect(queueErrors(db, 1, 'hardcover', 100)).toEqual([]);
     enqueue(db, 1, 'bookorbit', ev({ kind: 'highlight' }), 'highlight:a', 101);
-    expect(queueErrors(db, 1, 'bookorbit')[0].count).toBe(1);
+    expect(queueErrors(db, 1, 'bookorbit', 101)[0].count).toBe(1);
     markDone(db, rows[1].id, 102);
-    expect(queueErrors(db, 1, 'bookorbit')).toEqual([]);
+    expect(queueErrors(db, 1, 'bookorbit', 102)).toEqual([]);
+  });
+
+  it('names the books behind an error, once per book, and drops old given-up ones', () => {
+    const db = freshDb();
+    const piranesi = 'p'.repeat(32);
+    db.prepare("INSERT INTO documents (user_id, document, title, updated_at) VALUES (1, ?, 'Piranesi', 0)").run(piranesi);
+    enqueue(db, 1, 'audiobookshelf', ev({ document: piranesi }), 'progress', 100);
+    enqueue(db, 1, 'audiobookshelf', ev({ document: piranesi, kind: 'finished' }), 'finished', 100);
+    for (const row of claimReady(db, 10, 100)) markFailed(db, row, 'no book match', false, 100);
+    expect(queueErrors(db, 1, 'audiobookshelf', 100)).toEqual([{ kind: 'book', message: 'no book match', count: 1, titles: ['Piranesi'] }]);
+    expect(queueErrors(db, 1, 'audiobookshelf', 100 + 15 * 86400)).toEqual([]);
   });
 
   it('coalesces same (connector, document, kind) to the latest payload', () => {

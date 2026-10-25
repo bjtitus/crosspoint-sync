@@ -54,9 +54,10 @@ describe('connector management API', () => {
     const other = await registerUser(app);
     const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(owner.username) as { id: number };
     upsertAccount(db, id, 'bookorbit', { server: 'orbit.test', username: 'reader', password: 'pw' }, null);
-    enqueue(db, id, 'bookorbit', { kind: 'highlight', document: DOC, timestamp: 1 }, 'highlight:a', 1);
-    const [row] = claimReady(db, 1, 1);
-    markFailed(db, row, 'clipping has no position (update the reader firmware)', false, 1);
+    const now = Math.floor(Date.now() / 1000); // given-up failures show for two weeks
+    enqueue(db, id, 'bookorbit', { kind: 'highlight', document: DOC, timestamp: now }, 'highlight:a', now);
+    const [row] = claimReady(db, 1, now);
+    markFailed(db, row, 'clipping has no position (update the reader firmware)', false, now);
     const list = await (await app.request('/api/v1/connectors', { headers: owner.headers })).json();
     expect(list.connectors.find((c: { id: string }) => c.id === 'bookorbit')).toMatchObject({
       queue: { pending: 0, dead: 1 },

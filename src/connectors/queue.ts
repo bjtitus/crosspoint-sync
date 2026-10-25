@@ -113,14 +113,26 @@ export function queueDepth(db: DB, userId: number, connectorId: string): { pendi
 }
 
 /** Account-scoped delivery errors, grouped so one bad book cannot flood Settings. */
-export function queueErrors(db: DB, userId: number, connectorId: string): { kind: string; message: string; count: number }[] {
-  return db.prepare(`SELECT CASE WHEN kind LIKE 'highlight:%' OR kind = 'highlight' THEN 'clipping' ELSE kind END AS kind,
-      last_error AS message, COUNT(*) AS count
-    FROM connector_queue WHERE user_id = ? AND connector_id = ?
-      AND status IN ('pending', 'dead') AND last_error IS NOT NULL
-    GROUP BY CASE WHEN kind LIKE 'highlight:%' OR kind = 'highlight' THEN 'clipping' ELSE kind END, last_error
-    ORDER BY MAX(updated_at) DESC, last_error LIMIT 3`)
-    .all(userId, connectorId) as { kind: string; message: string; count: number }[];
+// Given-up items stop showing after this long; still-retrying ones always show.
+const ERROR_SHOW_DEAD_FOR = 14 * 86400;
+
+/** The newest failure messages for a connector, each with the books it hit.
+ *  Progress and finished events count as one per book; clippings count each. */
+export function queueErrors(
+  db: DB, userId: number, connectorId: string, now = nowSeconds()
+): { kind: 'book' | 'clipping'; message: string; count: number; titles: string[] }[] {
+  const rows = db.prepare(`SELECT CASE WHEN q.kind LIKE 'highlight%' THEN 'clipping' ELSE 'book' END AS kind,
+      q.last_error AS message,
+      CASE WHEN q.kind LIKE 'highlight%' THEN COUNT(*) ELSE COUNT(DISTINCT q.document) END AS count,
+      json_group_array(DISTINCT COALESCE(d.title, d.filename, 'Untitled book')) AS titles
+    FROM connector_queue q
+    LEFT JOIN documents d ON d.user_id = q.user_id AND d.document = q.document
+    WHERE q.user_id = ? AND q.connector_id = ? AND q.last_error IS NOT NULL
+      AND (q.status = 'pending' OR (q.status = 'dead' AND q.updated_at >= ?))
+    GROUP BY 1, q.last_error
+    ORDER BY MAX(q.updated_at) DESC, q.last_error LIMIT 3`)
+    .all(userId, connectorId, now - ERROR_SHOW_DEAD_FOR) as { kind: 'book' | 'clipping'; message: string; count: number; titles: string }[];
+  return rows.map((r) => ({ ...r, titles: (JSON.parse(r.titles) as string[]).sort() }));
 }
 
 export const _internals = { MAX_ATTEMPTS, BACKOFF, withTransaction };

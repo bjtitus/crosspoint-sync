@@ -204,6 +204,16 @@ describe('service delivery status', () => {
     expect(screen.getByRole('alert').textContent).toContain('1 clipping: clipping has no position')
   })
 
+  it('names the books behind an error, and shows unmatched books as a note', async () => {
+    api.connectors.mockResolvedValue({ connectors: [connector({ queue: { pending: 1, dead: 2 }, queue_errors: [
+      { kind: 'book', count: 1, message: 'rate limited', titles: ['Piranesi'] },
+      { kind: 'book', count: 4, message: 'no book match', titles: ['A', 'B', 'C', 'D'] },
+    ] })] })
+    renderSettings()
+    expect((await screen.findByRole('alert')).textContent).toBe('1 book: rate limited (Piranesi)')
+    expect(screen.getByText('4 books not found in BookOrbit (A, B, C, +1 more)')).toBeTruthy()
+  })
+
   it('labels the queued count as items rather than books', async () => {
     const { notify } = await import('./ui.jsx')
     api.connectors.mockResolvedValue({ connectors: [connector()] })
