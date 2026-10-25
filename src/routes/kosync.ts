@@ -65,7 +65,7 @@ export function languageTag(v: unknown): string | null {
   return /^[a-z]{2,3}(-[a-z0-9]{2,8}){0,3}$/i.test(tag) ? tag : null;
 }
 
-function parseMetadata(raw: unknown): DocumentMetadata | null {
+export function parseMetadata(raw: unknown): DocumentMetadata | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v.slice(0, 512) : null);
@@ -106,6 +106,22 @@ export function upsertDocumentMetadata(
        language = COALESCE(documents.language, excluded.language),
        updated_at = excluded.updated_at`
   ).run(userId, document, meta.title, meta.authors, meta.filename, meta.language, updatedAt);
+}
+
+/** Stores metadata (see upsertDocumentMetadata) and seeds the exact service ids it carries. */
+export function saveDocumentMetadata(
+  db: DB,
+  userId: number,
+  document: string,
+  meta: DocumentMetadata,
+  updatedAt: number
+): void {
+  upsertDocumentMetadata(db, userId, document, meta, updatedAt);
+  // Exact service ids from the plugin sidecar bypass fuzzy matching: seed the
+  // connector match cache so the runner pushes straight to that record.
+  if (Object.keys(meta.externalIds).length > 0) {
+    seedSidecarMatches(db, userId, document, meta.externalIds, (id) => getConnector(id) !== undefined, updatedAt);
+  }
 }
 
 /**
@@ -254,21 +270,7 @@ export function upsertProgress(db: DB, p: ProgressUpsert): void {
       p.updatedAt,
       seq
     );
-    if (p.metadata) {
-      upsertDocumentMetadata(db, p.userId, p.document, p.metadata, p.updatedAt);
-      // Exact service ids from the plugin sidecar bypass fuzzy matching: seed the
-      // connector match cache so the runner pushes straight to that record.
-      if (Object.keys(p.metadata.externalIds).length > 0) {
-        seedSidecarMatches(
-          db,
-          p.userId,
-          p.document,
-          p.metadata.externalIds,
-          (id) => getConnector(id) !== undefined,
-          p.updatedAt
-        );
-      }
-    }
+    if (p.metadata) saveDocumentMetadata(db, p.userId, p.document, p.metadata, p.updatedAt);
     // A write can lower the previous winner's timestamp (for example after a
     // merge). If an untouched row now wins, give that effective position this
     // write's sequence and mark it as a server-made change for every reader.
