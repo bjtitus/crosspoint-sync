@@ -256,31 +256,41 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     return c.json({ until: now, accepted: parsed.length });
   });
 
+  // `device_id` keeps one device; `since` (an earlier answer's `until`) keeps only the days uploaded since.
   app.get('/stats/global', (c) => {
     const user = c.get('user');
+    // An empty device_id means no filter, not a device called "".
+    const deviceId = c.req.query('device_id') || undefined;
+    const sinceRaw = Number(c.req.query('since') ?? 0);
+    const since = Number.isSafeInteger(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0;
+    const now = nowSeconds();
     const rows = db
       .prepare(
-        'SELECT device_id, device, payload, updated_at FROM stats_device_global WHERE user_id = ?'
+        'SELECT device_id, device, payload, updated_at FROM stats_device_global WHERE user_id = ? AND (? IS NULL OR device_id = ?)'
       )
-      .all(user.id) as { device_id: string; device: string; payload: string; updated_at: number }[];
-    const imported = readBookorbitStats(db, user.id);
+      .all(user.id, deviceId ?? null, deviceId ?? null) as { device_id: string; device: string; payload: string; updated_at: number }[];
+    const days = db.prepare(
+      'SELECT date, seconds FROM stats_device_day WHERE user_id = ? AND device_id = ? AND updated_at >= ? ORDER BY date'
+    );
     const devices = rows.map((r) => ({
         device_id: r.device_id,
         device: r.device,
         updated_at: r.updated_at,
-        stats: {
-          ...JSON.parse(r.payload),
-          daily: db.prepare('SELECT date, seconds FROM stats_device_day WHERE user_id = ? AND device_id = ? ORDER BY date')
-            .all(user.id, r.device_id),
-        },
+        stats: { ...JSON.parse(r.payload), daily: days.all(user.id, r.device_id, since) },
       }));
-    if (imported.global.sessions) devices.push({
-      device_id: 'connector:bookorbit', device: 'BookOrbit', updated_at: imported.updated_at,
-      stats: { ...imported.global, daily: imported.daily },
-    });
+    const imported = readBookorbitStats(db, user.id);
+    // Imported days carry no upload time of their own: all of them, once the import changed since.
+    if (imported.global.sessions && (!deviceId || deviceId === 'connector:bookorbit') && imported.updated_at >= since) {
+      devices.push({
+        device_id: 'connector:bookorbit', device: 'BookOrbit', updated_at: imported.updated_at,
+        stats: { ...imported.global, daily: imported.daily },
+      });
+    }
     return c.json({
       devices,
       bookorbit: bookorbitExclusions(imported),
+      // Pass as `since` next time. Inclusive, so a day uploaded in this same second comes again.
+      until: now,
     });
   });
 
