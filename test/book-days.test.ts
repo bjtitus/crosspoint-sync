@@ -79,4 +79,24 @@ describe('per-book days', () => {
     deleteDocumentData(db, id, A);
     expect(db.prepare('SELECT COUNT(*) AS n FROM stats_device_book_day').get()).toEqual({ n: 0 });
   });
+
+  it('count imported BookOrbit time in a filtered overview, only for the matched book', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-24T18:00:00Z'));
+    const { app, db } = makeTestApp();
+    const { username, headers } = await registerUser(app);
+    const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number };
+    const doc = db.prepare('INSERT INTO documents (user_id, document, language, updated_at) VALUES (?, ?, ?, 0)');
+    doc.run(id, A, 'ja');
+    doc.run(id, B, 'ja');
+    db.prepare("INSERT INTO connector_accounts (user_id, connector_id, cred_enc, created_at, updated_at) VALUES (?, 'bookorbit', '', 0, 0)").run(id);
+    db.prepare("INSERT INTO connector_matches (user_id, connector_id, document, external_id, source, updated_at) VALUES (?, 'bookorbit', ?, 'orbit-1', 'manual', 0)").run(id, A);
+    db.prepare("INSERT INTO bookorbit_stats_sync (user_id, external_id, active_generation, timezone) VALUES (?, 'orbit-1', 1, 'UTC')").run(id);
+    const start = Date.parse('2026-10-24T08:00:00Z') / 1000;
+    db.prepare('INSERT INTO bookorbit_stats_sessions (user_id, external_id, generation, session_id, started_at, ended_at, seconds) VALUES (?, ?, 1, 1, ?, ?, 600)')
+      .run(id, 'orbit-1', start, start + 600);
+
+    const o = await (await app.request('/api/v1/stats/overview?days=10&group_by=language', { headers })).json();
+    expect(o.groups.ja).toMatchObject({ reading_days: 1, seconds: 600, sessions: 1, today_seconds: 600 });
+  });
 });

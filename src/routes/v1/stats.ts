@@ -608,22 +608,22 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       const d = dayOf(r.date);
       t.perDay.set(d, (t.perDay.get(d) ?? 0) + Number(r.seconds));
     }
-    // Time imported from BookOrbit is one more device's. One lookup per book, only for accounts that
-    // link it; a single grouped read would scale better if libraries get large.
-    const hasImports = db
-      .prepare("SELECT 1 FROM connector_matches WHERE user_id = ? AND connector_id = 'bookorbit' LIMIT 1")
-      .get(userId);
-    if (hasImports) {
-      for (const document of info.keys()) {
-        const imported = readBookorbitStats(db, userId, statsDocuments(db, userId, document));
-        if (!imported.book.sessions) continue;
-        const t = entry(document);
-        t.seconds += imported.book.seconds;
-        t.sessions += imported.book.sessions;
-        for (const day of imported.daily) {
-          const d = dayOf(day.date);
-          t.perDay.set(d, (t.perDay.get(d) ?? 0) + day.seconds);
-        }
+    // Time imported from BookOrbit is one more device's. Only books matched to a BookOrbit book have
+    // any, so those are the only ones read.
+    const matched = new Set(
+      (db.prepare("SELECT DISTINCT document FROM connector_matches WHERE user_id = ? AND connector_id = 'bookorbit'")
+        .all(userId) as { document: string }[]).map((r) => canonical(r.document))
+    );
+    for (const document of matched) {
+      if (!info.has(document)) continue;
+      const imported = readBookorbitStats(db, userId, statsDocuments(db, userId, document));
+      if (!imported.book.sessions) continue;
+      const t = entry(document);
+      t.seconds += imported.book.seconds;
+      t.sessions += imported.book.sessions;
+      for (const day of imported.daily) {
+        const d = dayOf(day.date);
+        t.perDay.set(d, (t.perDay.get(d) ?? 0) + day.seconds);
       }
     }
     const sessionTotals = new Map<string, { seconds: number; count: number; perDay: Map<number, number> }>();
