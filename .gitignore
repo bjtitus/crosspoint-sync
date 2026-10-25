@@ -8,3 +8,6 @@ data/
 .localdata/
 .firecrawl/
 .env
+
+# Google Play service account keys live in ~/.android-keys/, never here.
+play-publisher*.json
