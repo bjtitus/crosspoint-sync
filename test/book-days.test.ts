@@ -108,4 +108,35 @@ describe('per-book days', () => {
     const o = await (await app.request('/api/v1/stats/overview?days=10&group_by=language', { headers })).json();
     expect(o.groups.ja).toMatchObject({ reading_days: 1, seconds: 600, sessions: 1, today_seconds: 600 });
   });
+
+  it('page through documents of any length, and leave zero-second days out of reading days', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-24T18:00:00Z'));
+    const { app, db } = makeTestApp();
+    const { username, headers } = await registerUser(app);
+    const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number };
+    const docs = ['a', 'b'.repeat(64), 'c'.repeat(32), 'd.e-f_1'];
+    await app.request('/api/v1/stats/books', {
+      method: 'PUT', headers, body: JSON.stringify({ device_id: 'dev:1&x', items: docs.map((d) => book(d)) }),
+    });
+    const seen: string[] = [];
+    let cursor: string | null = '';
+    for (let i = 0; cursor !== null && i < 10; i++) {
+      const page = await (
+        await app.request(`/api/v1/stats/books?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers })
+      ).json();
+      seen.push(...page.items.map((it: { document: string }) => it.document));
+      cursor = page.next;
+    }
+    expect(seen).toEqual([...docs].sort());
+
+    db.prepare('INSERT INTO documents (user_id, document, language, updated_at) VALUES (?, ?, ?, 0)').run(id, A, 'ja');
+    await app.request('/api/v1/stats/books', {
+      method: 'PUT', headers,
+      body: JSON.stringify({ device_id: 'x4', items: [book(A, { daily: [{ date: '2026-10-24', seconds: 0 }] })] }),
+    });
+    const o = await (await app.request('/api/v1/stats/overview?days=10&language=ja', { headers })).json();
+    expect(o.reading_days).toBe(0);
+  });
 });
+

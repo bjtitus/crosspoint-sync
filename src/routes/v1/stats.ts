@@ -379,9 +379,10 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const cursor = c.req.query('cursor') ?? '';
     const limitRaw = Number(c.req.query('limit') ?? DEFAULT_BOOK_PAGE);
     const limit = Number.isInteger(limitRaw) && limitRaw >= 1 ? Math.min(limitRaw, MAX_BOOK_PAGE) : DEFAULT_BOOK_PAGE;
-    // The document is always 32 characters; the device id follows it.
-    const afterDocument = cursor.slice(0, 32);
-    const afterDevice = cursor.slice(32);
+    // Documents never contain ':', so the first one splits the document from the device id.
+    const sep = cursor.indexOf(':');
+    const afterDocument = sep < 0 ? '' : cursor.slice(0, sep);
+    const afterDevice = sep < 0 ? '' : cursor.slice(sep + 1);
     const rows = db
       .prepare(
         `SELECT s.device_id, s.document, s.payload, s.updated_at, d.title, d.author, d.filename, d.language
@@ -415,7 +416,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
         updated_at: r.updated_at,
         stats: { ...JSON.parse(r.payload), daily: days.get(`${r.device_id}\n${r.document}`) ?? [] },
       })),
-      next: rows.length > limit ? `${last.document}${last.device_id}` : null,
+      next: rows.length > limit ? `${last.document}:${last.device_id}` : null,
       // Pass as `since` next time. Inclusive, so a book uploaded in this same second comes again.
       until: now,
     });
@@ -610,7 +611,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     // Per-book days devices uploaded with their snapshots, every device's summed.
     for (const r of db
-      .prepare('SELECT document, date, SUM(seconds) AS seconds FROM stats_device_book_day WHERE user_id = ? GROUP BY document, date')
+      .prepare('SELECT document, date, SUM(seconds) AS seconds FROM stats_device_book_day WHERE user_id = ? GROUP BY document, date HAVING SUM(seconds) > 0')
       .all(userId) as {
       document: string;
       date: string;

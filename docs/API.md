@@ -644,7 +644,8 @@ Every book's stats, one item per device and book, ordered by document. Each item
 `title`, `author`, `filename` and `language`, so a client can match it to a file without knowing the
 hash, plus `stats` with `daily` as above. Items are stored rows: a merged copy is listed under its own hash, where
 `GET /stats/books/{document}` folds it into its book. `device_id` keeps one device's items. `limit` defaults to 50
-(at most 200); pass the answer's `next` as `cursor` for the following page, until it is `null`.
+(at most 200); pass the answer's `next`, URL-encoded, as `cursor` for the following page, until it is `null`.
+Treat it as opaque: its format may change.
 `since` keeps the books uploaded at or after that time: pass the `until` of an earlier answer (its first page's) to
 fetch only what changed since then.
 
@@ -652,7 +653,7 @@ fetch only what changed since then.
 {"items": [{"device_id": "A1B2C3D4", "document": "a1b2...", "title": "Kokoro", "author": null,
   "filename": "kokoro.epub", "language": "ja", "updated_at": 1761300000,
   "stats": {"v": 5, "sessions": 9, "...": "...", "daily": [{"date": "2026-10-23", "seconds": 900}]}}],
- "next": "a1b2...A1B2C3D4", "until": 1761300100}
+ "next": "a1b2...:A1B2C3D4", "until": 1761300100}
 ```
 
 Merged documents (`POST /api/v1/documents/merge`, `{"document", "into", "stats"?}`): stats rows
