@@ -862,6 +862,13 @@ and these messages, refreshing every five seconds while work is pending. The "Sy
 `queued` value counts export items (progress and individual clippings), not distinct books or
 successful deliveries. "Sync now" also requeues failed items for another attempt.
 
+### Public profile
+
+`GET /api/v1/profile` returns `{ "slug": null }` while off. `PUT /api/v1/profile` with
+`{ "enabled": true }` turns it on and returns the random `slug` (kept while on; off then
+on makes a new one). The public page is `GET /u/{slug}`: no auth, HTML with reading
+stats, the books being read and the finished ones, embeddable in an iframe. 404 when off.
+
 ### GET /healthz
 
 Unauthenticated. `{"status": "ok", "version": "0.1.0"}`.

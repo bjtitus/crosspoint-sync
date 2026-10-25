@@ -239,6 +239,9 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(pick ? { external_id: pick.externalId, external_edition: pick.edition ?? null, title: pick.title, author: pick.author } : { external_id: null }),
     }),
+  // Public reading profile: { slug } (null = off).
+  profile: (s) => call(s, '/api/v1/profile'),
+  setProfile: (s, enabled) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ enabled }) }),
   // The sync account itself.
   changePassword: (s, password) => call(s, '/api/v1/account/password', { method: 'POST', body: JSON.stringify({ key: SparkMD5.hash(password) }) }),
   clearData: (s) => call(s, '/api/v1/account/data', { method: 'DELETE' }),

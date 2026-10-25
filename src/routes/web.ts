@@ -38,7 +38,7 @@ const FONTS = new Map<string, Buffer>();
 for (const f of fs.readdirSync(path.join(ASSETS_DIR, 'fonts'))) {
   if (f.endsWith('.woff2')) FONTS.set(f, fs.readFileSync(path.join(ASSETS_DIR, 'fonts', f)));
 }
-function fontFaces(basePath: string): string {
+export function fontFaces(basePath: string): string {
   const face = (family: string, file: string, weight: string) =>
     `@font-face{font-family:"${family}";src:url(${basePath}/fonts/${file}) format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
   return [

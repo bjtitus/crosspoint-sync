@@ -110,16 +110,18 @@ const layouts = {
   'l-paper': () => paper() + cap(`left:150px;right:auto;top:200px;width:820px;${BIG}`, 'left') + dev('left:1060px;top:240px;width:1600px;transform:rotate(-5deg)') + call('left:150px;top:820px;width:1100px;transform:rotate(1.5deg)'),
   // App Store Creative Assets, drawn at 2x. Product page header 1920x823 (3840x1646): Apple keeps
   // only a centered 823x330 safe on every device, so the caption sits there with real UI cards
-  // around it. Search result card 1920x1280 (3840x2560): caption inside the centered 1084x515
-  // safe area (x 418-1502, y 382-897). Every card stays whole inside the canvas.
+  // around it. Search result card 1920x1280 (3840x2560): the centered 1084x515 safe area is x 418-1502,
+  // y 382-897; the caption sits up and left of it by choice, so check it in App Store Connect's Preview.
+  // Every card stays whole inside the canvas.
   header: () => card('book', 'left:40px;top:60px;width:500px;transform:rotate(-3deg)')
     + card('quote', 'left:50px;top:400px;width:480px;transform:rotate(2deg)')
     + card('chart', 'left:1380px;top:50px;width:500px;transform:rotate(3deg)')
     + card('services', 'left:1390px;top:440px;width:490px;transform:rotate(-2deg)')
     + `<div class="cap" style="left:560px;right:560px;top:262px;--k:48px;--h:62px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`,
-  search: () => `<div class="cap left" style="left:440px;right:auto;top:420px;width:580px;--k:52px;--h:70px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
-    + card('book', 'left:1030px;top:190px;width:820px;transform:rotate(-2deg)')
-    + card('chart', 'left:1040px;top:640px;width:820px;transform:rotate(2deg)'),
+  search: () => `<div class="cap left" style="left:260px;right:auto;top:250px;width:760px;--k:58px;--h:100px"><div class="kick">${s.kick}</div><h1>${s.head}</h1></div>`
+    + card('quote', 'left:200px;top:680px;width:720px;transform:rotate(-1.5deg)')
+    + card('days', 'left:1130px;top:70px;width:700px;transform:rotate(2deg)')
+    + card('book', 'left:1120px;top:830px;width:730px;transform:rotate(-2deg)'),
   // The same two placements with the services CrossPoint Sync syncs to (spec.logos: [{src, name}]).
   'header-logos': () => {
     const at = [[90, 70], [330, 150], [130, 330], [380, 420], [110, 590], [1450, 90], [1700, 170], [1480, 400], [1720, 520]]

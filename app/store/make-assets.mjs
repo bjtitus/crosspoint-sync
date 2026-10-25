@@ -56,7 +56,7 @@ const DEVICES = {
   iphone: [{ width: 440, height: 956 }, 3, true, [62, 34]], // iPhone 6.9"
   ipad: [{ width: 1032, height: 1376 }, 2, false, [24, 20]], // iPad 13"
 }
-const ROUTES = { library: '', book: `book/${md5('Middlemarch')}`, stats: 'stats', clippings: 'clippings', settings: 'settings', send: 'send' }
+const ROUTES = { library: '', book: `book/${md5('Middlemarch')}`, stats: 'stats', clippings: 'clippings', settings: 'settings', send: 'send', days: 'stats' }
 
 // Callout crops in capture pixels: [x, y, width, height]. Re-measure if the UI layout moves.
 const CROPS = {
@@ -69,6 +69,7 @@ const CROPS = {
 // Whole UI cards for the App Store header and search images: [iphone screen, crop in capture pixels].
 const CARDS = {
   book: ['library', [44, 972, 1232, 612]],
+  days: ['days', [44, 204, 1232, 1176]],
   quote: ['clippings', [4, 424, 1312, 752]],
   chart: ['stats', [44, 1442, 1232, 680]],
   services: ['settings', [46, 446, 1230, 454]],
@@ -118,7 +119,8 @@ try {
   const browser = await chromium.launch({ channel: 'chrome' })
   stops.push(() => browser.close())
   for (const [tag, [viewport, scale, mobile, insets]] of Object.entries(DEVICES)) {
-    const screens = Object.keys(ROUTES).filter((s) => ['phone', 'iphone', 'ipad'].includes(tag) || s !== 'settings')
+    // Settings only where a store set uses it; the reading-days grid only for the App Store search card.
+    const screens = Object.keys(ROUTES).filter((s) => (s !== 'settings' || ['phone', 'iphone', 'ipad'].includes(tag)) && (s !== 'days' || tag === 'iphone'))
     await capture(browser, tag, viewport, scale, mobile, screens, insets)
   }
   for (const [prefix, tag, [w, h], dev, frames, scale] of SETS) {
@@ -132,7 +134,7 @@ try {
   // App Store Creative Assets (iOS 27+): product page header and search result card, PNG without alpha.
   const cards = Object.fromEntries(Object.entries(CARDS).map(([k, [screen, crop]]) => [k, [raw(`iphone-${screen}`), crop]]))
   await frame(browser, 1920, 823, { layout: 'header', kick: 'one place for your reading', head: 'Sync your CrossPoint Reader with all your favorite services', cards }, 'appstore-header.png', 2)
-  await frame(browser, 1920, 1280, { layout: 'search', kick: 'from your CrossPoint Reader', head: 'Your progress, highlights and stats on your phone', cards }, 'appstore-search.png', 2)
+  await frame(browser, 1920, 1280, { layout: 'search', kick: 'for your CrossPoint Reader', head: 'Your reading, synced', cards }, 'appstore-search.png', 2)
   // Second option: the services it syncs to (Spotify is beta and Kindle hidden, so both stay out).
   const logos = [['hardcover', 'Hardcover'], ['readwise', 'Readwise'], ['bookfusion', 'BookFusion'], ['kosync', 'KOReader'],
     ['microblog', 'Micro.blog'], ['audiobookshelf', 'Audiobookshelf'], ['jellyfin', 'Jellyfin'], ['bookorbit', 'BookOrbit'], ['seekquel', 'Seekquel']]
@@ -256,6 +258,17 @@ async function seed() {
       insertLog.run(md5(title), DEVICE, Number((percentage * (i + 1) / days).toFixed(4)), at)
     }
   }
+  // Minutes read on each day of the history bitmap, so the Reading days grid shades them
+  // against the median day: mostly typical days, some short, some long, longer at weekends.
+  // (The upload takes 20 days at a time, so these go in directly too.)
+  const insertDay = db.prepare('INSERT INTO stats_device_day (user_id, device_id, date, seconds, updated_at) VALUES (1, ?, ?, ?, ?)')
+  for (let n = 0; n < 200; n++) {
+    if (!(bits[n >> 3] & (1 << (n & 7)))) continue
+    const x = random()
+    const minutes = x < 0.2 ? 6 + x * 40 : x < 0.55 ? 20 + (x - 0.2) * 43 : x < 0.85 ? 40 + (x - 0.55) * 100 : 80 + (x - 0.85) * 466
+    const weekend = [0, 6].includes(new Date((now - n * DAY) * 1000).getUTCDay())
+    insertDay.run(DEVICE, iso(n), Math.round(minutes * 60 * (weekend ? 1.4 : 1)), now)
+  }
   db.close()
 }
 
@@ -308,8 +321,10 @@ async function capture(browser, tag, viewport, scale, mobile, screens, [top, bot
   for (const screen of screens) {
     await page.goto(`http://localhost:${VITE_PORT}/#/${ROUTES[screen]}`)
     await page.waitForTimeout(3500) // covers and charts settle
-    if (screen === 'settings' && mobile) { // tablets show Connected services unscrolled
-      await page.getByText('Connected services', { exact: true }).evaluate((e, top) => window.scrollBy(0, e.getBoundingClientRect().top - 24 - top), top)
+    // Scrolled captures: tablets show Connected services unscrolled; days is Stats down at its grid.
+    const anchor = { settings: mobile && 'Connected services', days: 'Reading days' }[screen]
+    if (anchor) {
+      await page.getByText(anchor, { exact: true }).evaluate((e, top) => window.scrollBy(0, e.getBoundingClientRect().top - 24 - top), top)
       await page.waitForTimeout(500)
     }
     await page.screenshot({ path: path.join(TMP, 'raw', `${tag}-${screen}.png`) })

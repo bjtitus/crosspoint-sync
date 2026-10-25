@@ -15,6 +15,7 @@ import { clippingRoutes } from './routes/v1/clippings.js';
 import { statsRoutes } from './routes/v1/stats.js';
 import { documentRoutes } from './routes/v1/documents.js';
 import { connectorRoutes, oauthCallbackRoutes } from './routes/v1/connectors.js';
+import { profileSettingsRoutes, publicProfileRoutes } from './routes/profile.js';
 import { kindleRegisterRoutes } from './routes/v1/kindle-register.js';
 import { createProgressRefresh } from './connectors/refresh.js';
 import type { HttpTransport } from './connectors/types.js';
@@ -68,6 +69,8 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   // Web UI (landing / account pages).
   app.route('/', webRoutes(undefined, basePath));
   app.route('/', oauthCallbackRoutes(db, opts.connectorTransport, basePath));
+  // Opt-in public reading profiles (linkable and iframe-embeddable).
+  app.route('/', publicProfileRoutes(db, basePath));
 
   // kosync-compatible API at the root - stock KOReader and current CrossPoint
   // firmware work by changing only the server URL.
@@ -88,6 +91,7 @@ export function createApp(db: DB, config: Config, opts: AppOptions = {}): Hono<A
   v1.route('/', documentRoutes(db, opts.connectorTransport));
   v1.route('/', connectorRoutes(db, opts.connectorTransport, config.trustProxy, basePath));
   v1.route('/', meRoutes(db));
+  v1.route('/', profileSettingsRoutes(db));
   // Self-host-only Amazon device registration (off unless explicitly enabled).
   if (config.kindleServerRegistration) {
     v1.route('/', kindleRegisterRoutes(db, opts.connectorTransport, config.trustProxy));

@@ -633,6 +633,61 @@ function Services({ session }) {
   )
 }
 
+// Opt-in public page with stats and shelves, to link to or embed on a website.
+function Profile({ session }) {
+  const [data, error, reload] = useLoad(() => api.profile(session), [session], `profile ${session.username}@${session.server}`)
+  const [busy, setBusy] = useState(false)
+  if (error && !data) return <p className="py-4 text-sm text-stone-500">Couldn&apos;t load your profile ({error.message}).</p>
+  if (!data) return <Loader2 className="mx-auto my-6 size-5 animate-spin text-stone-400" />
+  const url = data.slug && `${session.server.replace(/\/$/, '')}/u/${data.slug}`
+  const copy = async (text, what) => {
+    await navigator.clipboard.writeText(text)
+    notify({ title: `${what} copied` })
+  }
+  const button = 'flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-stone-100 text-sm font-semibold text-stone-800 active:bg-stone-200'
+  return (
+    <Card className="mt-3 divide-y divide-stone-100">
+      <label className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800">
+        <span className="flex-1">Public profile</span>
+        {busy ? (
+          <Loader2 className="size-5 animate-spin text-stone-400" />
+        ) : (
+          <Toggle
+            checked={!!data.slug}
+            label="Public profile"
+            onChange={async (on) => {
+              setBusy(true)
+              try {
+                await api.setProfile(session, on)
+                reload()
+              } catch (e) {
+                notify({ error: true, title: "That didn't work", detail: e.message })
+              } finally {
+                setBusy(false)
+              }
+            }}
+          />
+        )}
+      </label>
+      {url && (
+        <div className="space-y-2 px-4 py-3">
+          <a href={url} target="_blank" rel="noreferrer" onClick={(e) => isApp && (e.preventDefault(), openUrl(url))} className="block truncate font-mono text-xs text-brand-600">
+            {url}
+          </a>
+          <div className="flex gap-2">
+            <button type="button" className={button} onClick={() => copy(url, 'Link')}>
+              <Copy className="size-4" /> Copy link
+            </button>
+            <button type="button" className={button} onClick={() => copy(`<iframe src="${url}" width="100%" height="600" style="border:0"></iframe>`, 'Embed code')}>
+              <Copy className="size-4" /> Copy embed
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // Password, clear data, delete: what the website's account page did.
 function Account({ session, onSession, onLogout }) {
   const [action, setAction] = useState(null)
@@ -788,6 +843,10 @@ export default function Settings({ session, theme, onSession, onLogout }) {
       <h2 className={section}>Connected services</h2>
       <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>
       <Services session={session} />
+
+      <h2 className={section}>Public profile</h2>
+      <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website. Turning it off and on makes a new link.</p>
+      <Profile session={session} />
 
       <h2 className={section}>Account</h2>
       <Account session={session} onSession={onSession} onLogout={onLogout} />
