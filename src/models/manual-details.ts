@@ -29,17 +29,17 @@ export function keepManual(column: string): string {
 export const MANUAL_COLUMNS = MANUAL_DETAILS.flatMap((d) => [...d.columns, `${d.flag}_manual`]);
 
 /**
- * The merge's SET clauses: a detail set by hand beats the lookup's; otherwise the kept document's wins.
- * A group (series) moves together, so a series and the number from the other copy never mix.
+ * The merge's SET clauses: a detail set by hand beats the lookup's, the kept document's when both are; else
+ * the kept document's when it has one. A group (series) moves together, so a series and the number from the
+ * other copy never mix. Set by hand counts even when empty: a list cleared on purpose stays cleared.
  */
 export function mergeManualSql(): string {
   return MANUAL_DETAILS.flatMap((d) => {
     const fromAlias = `excluded.${d.flag}_manual AND NOT documents.${d.flag}_manual`;
-    // The kept document's group whole when it has one, else the merged-away one's.
-    const keptHas = `documents.${d.columns[0]} IS NOT NULL`;
+    const keepOwn = `documents.${d.flag}_manual OR documents.${d.columns[0]} IS NOT NULL`;
     return [
       ...d.columns.map((c) =>
-        `${c} = CASE WHEN ${fromAlias} THEN excluded.${c} WHEN ${keptHas} THEN documents.${c} ELSE excluded.${c} END`),
+        `${c} = CASE WHEN ${fromAlias} THEN excluded.${c} WHEN ${keepOwn} THEN documents.${c} ELSE excluded.${c} END`),
       `${d.flag}_manual = MAX(documents.${d.flag}_manual, excluded.${d.flag}_manual)`,
     ];
   }).join(',\n         ');

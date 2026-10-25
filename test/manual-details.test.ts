@@ -78,4 +78,18 @@ describe('book details set by hand', () => {
     expect(db.prepare('SELECT series, series_position, hc_series_id, series_manual FROM documents WHERE document = ?').get(DOC))
       .toEqual({ series: 'Tevanne', series_position: 3, hc_series_id: null, series_manual: 1 });
   });
+
+  it('keep a detail cleared by hand cleared through a merge', async () => {
+    const { app, db } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const OTHER = 'ffffffffffffffffffffffffffffffff';
+    for (const document of [DOC, OTHER]) await app.request('/syncs/progress', { ...progress(document), headers });
+    // No moods on purpose on the kept copy; Hardcover's on the other.
+    await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ moods: [] }) });
+    db.prepare('UPDATE documents SET moods = ? WHERE document = ?').run('["Funny"]', OTHER);
+
+    await app.request('/api/v1/documents/merge', { method: 'POST', headers, body: JSON.stringify({ document: OTHER, into: DOC }) });
+    expect(db.prepare('SELECT moods, moods_manual FROM documents WHERE document = ?').get(DOC)).toEqual({ moods: null, moods_manual: 1 });
+  });
 });
+
