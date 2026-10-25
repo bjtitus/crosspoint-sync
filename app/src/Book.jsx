@@ -327,6 +327,7 @@ function CoverPicker({ session, book, onDone, onClose }) {
 function MergePicker({ session, book, books, onDone, onClose }) {
   const [selected, setSelected] = useState(null)
   const [stats, setStats] = useState(true)
+  const [query, setQuery] = useState('')
   // Syncs with no title or filename (e.g. KOReader on a binary hash) are hidden from
   // the library; list them here, newest first, so they can be folded into the real book.
   const [untitled] = useLoad(() => api.untitledBooks(session).catch(() => []), [session], 'untitled books')
@@ -334,6 +335,9 @@ function MergePicker({ session, book, books, onDone, onClose }) {
     .filter((b) => b.document !== book.document)
     .sort((a, b) => Number(looksLikeSame(book, b)) - Number(looksLikeSame(book, a)) || (a.title ?? '').localeCompare(b.title ?? ''))
     .concat([...(untitled ?? [])].sort((a, b) => b.timestamp - a.timestamp))
+  // Matched the way duplicates are, so any script, width or case finds the book.
+  const q = norm(query)
+  const shown = q ? others.filter((b) => [b.title, b.author, b.filename].some((v) => norm(v).includes(q))) : others
   if (selected) {
     const what = selected.stats ? 'progress, clippings and reading stats' : 'progress and clippings'
     return (
@@ -354,8 +358,19 @@ function MergePicker({ session, book, books, onDone, onClose }) {
         <input type="checkbox" checked={stats} onChange={(e) => setStats(e.target.checked)} className="size-4 accent-brand-500" />
         Combine reading stats (time, pages, sessions)
       </label>
+      <input
+        className={`${field} mt-4 scroll-mt-4`}
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search title, author or file"
+        aria-label="Search books"
+        autoCapitalize="none"
+        autoCorrect="off"
+      />
+      {shown.length === 0 && <p className="mt-4 text-center text-sm text-stone-500">No book matches.</p>}
       <Card className="mt-4 divide-y divide-stone-100">
-        {others.map((b) => (
+        {shown.map((b) => (
           <button key={b.document} onClick={() => setSelected({ book: b, stats })} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-stone-50">
             <Cover session={session} book={b} small className="w-9" />
             <div className="min-w-0 flex-1">
