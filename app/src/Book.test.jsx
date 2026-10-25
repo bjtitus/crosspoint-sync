@@ -179,3 +179,20 @@ it('retries only unfinished separations after a partial failure', async () => {
   expect(onChange).toHaveBeenCalledOnce()
   expect(nativeConfirm).not.toHaveBeenCalled()
 })
+
+it('searches the books to merge by title, author or file, in any script', () => {
+  const kanji = { ...book, document: 'kanji', title: '小学1年生 漢字にぐーんと強くなる', author: 'Unknown Author' }
+  const orwell = { ...book, document: 'orwell', title: '1984', author: 'George Orwell', filename: 'nineteen.epub' }
+  render(<Book session={{}} book={book} books={[book, kanji, orwell]} onChange={vi.fn()} />)
+  openBookAction('Merge a duplicate')
+  const search = screen.getByRole('searchbox', { name: 'Search books' })
+  fireEvent.change(search, { target: { value: '漢字' } })
+  expect(screen.getByText(kanji.title)).toBeTruthy()
+  expect(screen.queryByText('1984')).toBeNull()
+  fireEvent.change(search, { target: { value: 'ORWELL' } })  // case
+  expect(screen.getByText('1984')).toBeTruthy()
+  fireEvent.change(search, { target: { value: 'ｎｉｎｅｔｅｅｎ' } })  // full-width, matching the file name
+  expect(screen.getByText('1984')).toBeTruthy()
+  fireEvent.change(search, { target: { value: 'nothing like this' } })
+  expect(screen.getByText('No book matches.')).toBeTruthy()
+})

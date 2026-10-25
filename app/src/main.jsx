@@ -14,9 +14,10 @@ import './index.css'
 
 // Keep the field being typed into visible once the on-screen keyboard has opened
 // (Android resizes the window via adjustResize; this centres the field in what's left).
+// A search field goes to the top instead, leaving the room below for its results.
 document.addEventListener('focusin', (e) => {
   if (e.target.matches('input:not([type=range]), textarea, select')) {
-    setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300)
+    setTimeout(() => e.target.scrollIntoView({ block: e.target.type === 'search' ? 'start' : 'center', behavior: 'smooth' }), 300)
   }
 })
 
