@@ -281,15 +281,6 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const title = text(o.title);
     const author = text(o.author);
     const language = o.language === undefined || o.language === null ? o.language : languageTag(o.language);
-    // Genres, moods and content warnings: a short list of short names, spelled the way Hardcover's are stored (tidy():
-    // trimmed, de-duplicated ignoring case, first letter capitalized), so the two sources count as one.
-    // null clears a list; undefined leaves it alone.
-    const tags = (v: unknown, max: number) => {
-      if (v === undefined || v === null) return { list: v as null | undefined, ok: true };
-      const ok = Array.isArray(v) &&
-        v.every((g) => typeof g === 'string' && g.trim().length > 0 && g.trim().length <= 64) && tidy(v, max + 1).length <= max;
-      return { list: ok ? tidy(v, max) : undefined, ok };
-    };
     // Each detail set by hand (MANUAL_DETAILS): its columns' values, or null to hand it back to Hardcover.
     const details = new Map<ManualFlag, (string | number | null)[] | null>();
     let detailsOk = true;
@@ -299,9 +290,12 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       if (values === undefined) detailsOk = false;
       else details.set(flag, values);
     };
+    // Genres, moods and content warnings: a short list of short names, spelled the way Hardcover's are stored (tidy():
+    // trimmed, de-duplicated ignoring case, first letter capitalized), so the two sources count as one.
     const list = (max: number) => (v: unknown) => {
-      const { list: l, ok } = tags(v, max);
-      return ok && l ? [l.length ? JSON.stringify(l) : null] : undefined;
+      if (!Array.isArray(v) || !v.every((g) => typeof g === 'string' && g.trim().length > 0 && g.trim().length <= 64)) return undefined;
+      const l = tidy(v, max + 1);
+      return l.length <= max ? [l.length ? JSON.stringify(l) : null] : undefined;
     };
     take('genres', o.genres, list(10));
     take('moods', o.moods, list(12));

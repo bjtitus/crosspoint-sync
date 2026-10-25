@@ -76,6 +76,12 @@ function bookFilter(language?: string, genre?: string, author?: string) {
 }
 
 /** The caller's UTC offset in minutes as JS getTimezoneOffset() gives it; 0 when absent or implausible. */
+/** `device_id` and `since` filters: an empty device_id means no filter, a bad since means from the start. */
+function deviceSince(device: string | undefined, sinceRaw: string | undefined) {
+  const since = Number(sinceRaw ?? 0);
+  return { deviceId: device || undefined, since: Number.isSafeInteger(since) && since > 0 ? since : 0 };
+}
+
 function tzFrom(raw: string | undefined): number {
   const tz = Number(raw ?? 0);
   return Number.isFinite(tz) && Math.abs(tz) <= 14 * 60 ? tz : 0;
@@ -282,10 +288,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   // `device_id` keeps one device; `since` (an earlier answer's `until`) keeps only the days uploaded since.
   app.get('/stats/global', (c) => {
     const user = c.get('user');
-    // An empty device_id means no filter, not a device called "".
-    const deviceId = c.req.query('device_id') || undefined;
-    const sinceRaw = Number(c.req.query('since') ?? 0);
-    const since = Number.isSafeInteger(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0;
+    const { deviceId, since } = deviceSince(c.req.query('device_id'), c.req.query('since'));
     const now = nowSeconds();
     const rows = db
       .prepare(
@@ -381,10 +384,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
   // `until`) keeps the books uploaded since then.
   app.get('/stats/books', (c) => {
     const user = c.get('user');
-    // An empty device_id means no filter, not a device called "".
-    const deviceId = c.req.query('device_id') || undefined;
-    const sinceRaw = Number(c.req.query('since') ?? 0);
-    const since = Number.isSafeInteger(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0;
+    const { deviceId, since } = deviceSince(c.req.query('device_id'), c.req.query('since'));
     const now = nowSeconds();
     const cursor = c.req.query('cursor') ?? '';
     const limitRaw = Number(c.req.query('limit') ?? DEFAULT_BOOK_PAGE);
@@ -562,7 +562,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }[];
     for (const r of rows) {
       const key = `${r.device_id}\n${r.document}`;
-      out.set(key, [...(out.get(key) ?? []), { date: r.date, seconds: Number(r.seconds) }]);
+      (out.get(key) ?? out.set(key, []).get(key)!).push({ date: r.date, seconds: Number(r.seconds) });
     }
     return out;
   }
@@ -611,7 +611,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       payload: string;
     }[]) {
       const key = canonical(r.document);
-      snapshots.set(key, [...(snapshots.get(key) ?? []), JSON.parse(r.payload) as BookStatsSnapshot]);
+      (snapshots.get(key) ?? snapshots.set(key, []).get(key)!).push(JSON.parse(r.payload) as BookStatsSnapshot);
     }
     for (const [document, list] of snapshots) {
       const combined = combineBookStats(list);
