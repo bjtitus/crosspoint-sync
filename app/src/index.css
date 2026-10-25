@@ -125,7 +125,7 @@ img { -webkit-user-drag: none; }
 
 /* A sheet being typed in: hide the page behind it (see Sheet in ui.jsx). */
 .sheet-typing #root { visibility: hidden; }
-.sheet-typing .sheet-layer { visibility: visible; }
+.sheet-typing .sheet-layer, .sheet-typing .toast-layer { visibility: visible; }
 
 /* Status bar backdrop: pinned in the page colour so content scrolls (and rubber-bands)
    under it, as in native apps, instead of the whole screen moving. Height is 0 where

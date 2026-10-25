@@ -333,7 +333,7 @@ export function Toaster() {
   if (!toast) return null
   const Icon = toast.error ? CircleAlert : CircleCheck
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6 md:pl-60 lg:pl-64">
+    <div className="toast-layer pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6 md:pl-60 lg:pl-64">
       <button
         key={toast.id}
         type="button"

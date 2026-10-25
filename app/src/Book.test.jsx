@@ -215,3 +215,12 @@ it('edits details in one form and sends only what changed', async () => {
   await waitFor(() => expect(api.setInfo).toHaveBeenCalledWith({}, 'book', { moods: ['Dark', 'Hopeful'], genres: [], release_year: 1872 }))
   await waitFor(() => expect(onChange).toHaveBeenCalled())
 })
+
+it('edits only the author of a book without a stored title', async () => {
+  api.setInfo.mockResolvedValue({})
+  render(<Book session={{}} book={{ document: 'book', filename: 'scan.epub', percentage: 0.1 }} books={[]} onChange={vi.fn()} />)
+  openBookAction('Edit details')
+  fireEvent.change(screen.getByRole('textbox', { name: 'Author' }), { target: { value: 'Tove Jansson' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(api.setInfo).toHaveBeenCalledWith({}, 'book', { author: 'Tove Jansson' }))
+})

@@ -548,16 +548,18 @@ function EditDetailsSheet({ session, book, onDone, onClose }) {
 
   async function save(e) {
     e.preventDefault()
-    if (!title.trim()) return notify({ error: true, title: 'A title is needed' })
+    const titleChanged = title.trim() !== (book.title ?? '')
+    if (titleChanged && !title.trim()) return notify({ error: true, title: 'A title is needed' })
     const n = String(position).trim() === '' ? null : Number(String(position).replace(',', '.'))
     if (n !== null && !(n >= 0 && n <= 10000)) return notify({ error: true, title: 'The series number is from 0 to 10000' })
     const y = String(year).trim() === '' ? null : parseInt(year, 10)
     if (y !== null && !(y >= 1 && y <= 9999)) return notify({ error: true, title: 'Enter a release year' })
     const p = String(pages).trim() === '' ? null : parseInt(pages, 10)
-    if (p !== null && !(p > 0)) return notify({ error: true, title: 'Enter the number of pages' })
+    if (p !== null && !(p > 0 && p <= 100000)) return notify({ error: true, title: 'Enter the number of pages' })
 
     const patch = {}
-    if (title.trim() !== (book.title ?? '') || author.trim() !== (book.author ?? '')) Object.assign(patch, { title: title.trim(), author: author.trim() })
+    if (titleChanged) patch.title = title.trim()
+    if (author.trim() !== (book.author ?? '')) patch.author = author.trim()
     for (const f of LIST_FIELDS) if (!sameList(lists[f.key], book[f.key] ?? [])) patch[f.key] = lists[f.key]
     if (description !== null && description.trim() !== (about?.description ?? '')) patch.description = description.trim()
     if (series.trim() !== (book.series ?? '') || n !== (book.series_position ?? null)) Object.assign(patch, series.trim() ? { series: series.trim(), series_position: n } : { series: null })
@@ -568,7 +570,7 @@ function EditDetailsSheet({ session, book, onDone, onClose }) {
     setSaving(true)
     try {
       await api.setInfo(session, book.document, patch)
-      notify(patch.title ? { title: 'Saved', detail: 'Looking up the cover and details again.' } : { title: 'Saved' })
+      notify(patch.title !== undefined || patch.author !== undefined ? { title: 'Saved', detail: 'Looking up the cover and details again.' } : { title: 'Saved' })
       onDone()
     } catch (err) {
       notify({ error: true, title: "Couldn't save", detail: err.message })
@@ -598,7 +600,7 @@ function EditDetailsSheet({ session, book, onDone, onClose }) {
         <div className="grid grid-cols-[1fr_6rem] gap-3">
           <label className={label}>
             Series
-            <input value={series} onChange={(e) => setSeries(e.target.value)} className={`${field} mt-1.5`} />
+            <input value={series} onChange={(e) => setSeries(e.target.value)} maxLength={200} className={`${field} mt-1.5`} />
           </label>
           <label className={label}>
             Number
