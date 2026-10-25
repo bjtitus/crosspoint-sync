@@ -290,17 +290,22 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const title = text(o.title);
     const author = text(o.author);
     const language = o.language === undefined || o.language === null ? o.language : languageTag(o.language);
-    // Same shape Hardcover's genres are stored in: a short list of short names.
-    const genres = Array.isArray(o.genres) ? [...new Set(o.genres.map(text))] : o.genres;
-    const genresOk =
-      genres === undefined || genres === null ||
-      (Array.isArray(genres) && genres.length <= 10 && genres.every((g) => typeof g === 'string' && g.length > 0 && g.length <= 64));
+    // Genres and moods: the shape Hardcover's are stored in, a short list of short names, trimmed and
+    // de-duplicated. null clears a list; undefined leaves it alone.
+    const tags = (v: unknown, max: number) => {
+      const list = Array.isArray(v) ? [...new Set(v.map(text))] : v;
+      const ok = list === undefined || list === null ||
+        (Array.isArray(list) && list.length <= max && list.every((g) => typeof g === 'string' && g.length > 0 && g.length <= 64));
+      return { list: list as string[] | null | undefined, ok };
+    };
+    const genres = tags(o.genres, 10);
+    const moods = tags(o.moods, 12);
     // A title is required once edited; an empty author means "no author".
     const titleOk = title === undefined || (typeof title === 'string' && title.length > 0);
     const authorOk = author === undefined || typeof author === 'string';
     const coverOk = cover === undefined || cover === null || (typeof cover === 'string' && /^https?:\/\/\S{1,2000}$/.test(cover));
     const pagesOk = pages === undefined || pages === null || (Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= 100000);
-    if (!isValidDocument(param) || !coverOk || !pagesOk || !titleOk || !authorOk || !genresOk || (language === null && o.language !== null)) {
+    if (!isValidDocument(param) || !coverOk || !pagesOk || !titleOk || !authorOk || !genres.ok || !moods.ok || (language === null && o.language !== null)) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
     const user = c.get('user');
@@ -316,11 +321,12 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (language !== undefined) {
       db.prepare('UPDATE documents SET language = ? WHERE user_id = ? AND document = ?').run(language as string | null, user.id, document);
     }
-    if (genres !== undefined) {
-      const list = genres as string[] | null;
-      // Clearing hands genres back to Hardcover: the next enrichment pass looks the book up again.
+    for (const [column, { list }] of [['genres', genres], ['moods', moods]] as const) {
+      if (list === undefined) continue;
+      // A list set here sticks over Hardcover's; clearing hands it back: the next enrichment pass looks
+      // the book up again. `column` is one of the two names above, never request data.
       db.prepare(
-        `UPDATE documents SET genres = ?, genres_manual = ?, hc_checked_at = CASE WHEN ? THEN hc_checked_at ELSE NULL END
+        `UPDATE documents SET ${column} = ?, ${column}_manual = ?, hc_checked_at = CASE WHEN ? THEN hc_checked_at ELSE NULL END
          WHERE user_id = ? AND document = ?`
       ).run(list?.length ? JSON.stringify(list) : null, list ? 1 : 0, list ? 1 : 0, user.id, document);
     }
@@ -335,11 +341,12 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       ).run((title as string | undefined) ?? null, author !== undefined ? 1 : 0, (author as string | undefined) ?? '', user.id, document);
       db.prepare("DELETE FROM connector_matches WHERE user_id = ? AND document = ? AND source IN ('auto', 'none')").run(user.id, document);
     }
-    const row = db.prepare('SELECT cover_url, page_count, title, author, language, genres FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as {
+    const row = db.prepare('SELECT cover_url, page_count, title, author, language, genres, moods FROM documents WHERE user_id = ? AND document = ?').get(user.id, document) as {
       cover_url: string | null; page_count: number | null; title: string | null; author: string | null; language: string | null; genres: string | null;
+      moods: string | null;
     };
     return c.json({ document, cover_url: row.cover_url, page_count: row.page_count, title: row.title, author: row.author, language: row.language,
-      genres: row.genres ? (JSON.parse(row.genres) as string[]) : [] });
+      genres: row.genres ? (JSON.parse(row.genres) as string[]) : [], moods: row.moods ? (JSON.parse(row.moods) as string[]) : [] });
   });
 
   app.get('/documents', (c) => {
