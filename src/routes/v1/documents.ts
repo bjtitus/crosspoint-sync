@@ -214,7 +214,7 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     return c.json({ url: info.cover, pages: info.pages });
   });
 
-  // The book's description (from Hardcover's catalog). Kept out of the progress
+  // The book's description (from Hardcover's catalog or set by hand). Kept out of the progress
   // list so that stays small enough to cache offline.
   app.get('/documents/:document/about', (c) => {
     const param = c.req.param('document');
@@ -223,9 +223,9 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     }
     const user = c.get('user');
     const row = db
-      .prepare('SELECT description FROM documents WHERE user_id = ? AND document = ?')
-      .get(user.id, resolveDocument(db, user.id, param)) as { description: string | null } | undefined;
-    return c.json({ description: row?.description ?? null });
+      .prepare('SELECT description, description_manual FROM documents WHERE user_id = ? AND document = ?')
+      .get(user.id, resolveDocument(db, user.id, param)) as { description: string | null; description_manual: number } | undefined;
+    return c.json({ description: row?.description ?? null, manual: !!row?.description_manual });
   });
 
   // The next book in this book's series, from Hardcover (needs HARDCOVER_API_KEY and

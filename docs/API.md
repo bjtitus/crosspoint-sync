@@ -722,6 +722,11 @@ The details Hardcover fills in can all be set this way:
 next device sync fills it again. Returns the stored `{document, cover_url, page_count, title, author, language,
 genres, moods, content_warnings, description, series, series_position, release_year}`.
 
+#### GET /api/v1/documents/{document}/about
+
+The book's description: `{"description": "...", "manual": false}`. `manual` is true when the description was set
+with `PUT /info`, so a client can drop the Hardcover credit. `description` is null when there is none.
+
 #### GET /api/v1/documents/{document}/cover/candidates?q=
 
 Up to 12 covers to choose from (`{"items": [{url, title, author, source, pages}]}`), best matches

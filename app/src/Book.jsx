@@ -855,7 +855,7 @@ function About({ session, book, revision }) {
   if (!description) return null
   return (
     <Card className="relative mt-4 p-4">
-      <ViaHardcover slug={book.hardcover_slug} />
+      {!data.manual && <ViaHardcover slug={book.hardcover_slug} />}
       <p className="text-xs font-medium text-stone-500">About this book</p>
       <p ref={text} className={`mt-1.5 text-sm/6 whitespace-pre-line text-stone-700 ${open ? '' : 'line-clamp-6'}`}>
         {description}

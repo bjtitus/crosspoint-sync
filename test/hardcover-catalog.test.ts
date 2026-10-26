@@ -107,8 +107,11 @@ describe('Hardcover catalog details', () => {
     expect(info.pages).toBe(512); // Hardcover fills the page count the free sources missed
 
     const list = (await (await app.request('/api/v1/progress', { headers })).json()) as { items: any[] };
-    const about = (await (await app.request(`/api/v1/documents/${DOC}/about`, { headers })).json()) as { description: string };
+    const about = (await (await app.request(`/api/v1/documents/${DOC}/about`, { headers })).json()) as { description: string; manual: boolean };
     expect(about.description).toContain('Sancia Grado is a thief');
+    expect(about.manual).toBe(false);
+    await app.request(`/api/v1/documents/${DOC}/info`, { method: 'PUT', headers, body: JSON.stringify({ description: 'My own words.' }) });
+    expect(await (await app.request(`/api/v1/documents/${DOC}/about`, { headers })).json()).toEqual({ description: 'My own words.', manual: true });
     expect(list.items[0]).not.toHaveProperty('description'); // the list stays small
     expect(list.items[0]).toMatchObject({
       moods: ['Adventurous', 'Mysterious', 'Dark', 'Tense', 'Funny'],
