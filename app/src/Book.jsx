@@ -533,7 +533,8 @@ const sameList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]
 // Every detail but the cover and reading dates, in one form. Only changed fields are sent: an emptied list or
 // description is saved empty, while a cleared series, year or page count goes back to the lookup. A new title
 // sticks over later device syncs and the cover and catalog details are looked up again with it.
-function EditDetailsSheet({ session, book, onDone, onClose }) {
+function EditDetailsSheet({ session, book: current, onDone, onClose }) {
+  const [book] = useState(current) // the values the form opened with, so a background refresh is not saved as an edit
   const [about] = useLoad(() => api.about(session, book.document), [book.document], `about ${book.document}`)
   const [title, setTitle] = useState(book.title ?? '')
   const [author, setAuthor] = useState(book.author ?? '')
