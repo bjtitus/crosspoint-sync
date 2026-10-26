@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 vi.hoisted(() => {
   window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
 })
-vi.mock('./api.js', () => ({ isApp: false, api: { setStatus: vi.fn(), merge: vi.fn(), unmerge: vi.fn(), removeBook: vi.fn(), syncBook: vi.fn() } }))
+vi.mock('./api.js', () => ({ isApp: false, api: { setStatus: vi.fn(), merge: vi.fn(), unmerge: vi.fn(), removeBook: vi.fn(), syncBook: vi.fn(), setInfo: vi.fn() } }))
 const loads = vi.hoisted(() => ({}))
 vi.mock('./ui.jsx', async (original) => ({ ...await original(), useLoad: (fn, deps, memo) => [loads[memo] ?? null] }))
 vi.mock('./tabbar.js', () => ({ useSheet() {}, useNativeBack() {}, useNativeButton() {} }))
@@ -195,4 +195,32 @@ it('searches the books to merge by title, author or file, in any script', () => 
   expect(screen.getByText('1984')).toBeTruthy()
   fireEvent.change(search, { target: { value: 'nothing like this' } })
   expect(screen.getByText('No book matches.')).toBeTruthy()
+})
+
+it('edits details in one form and sends only what changed', async () => {
+  const onChange = vi.fn()
+  api.setInfo.mockResolvedValue({})
+  loads['about book'] = { description: 'Old blurb.' }
+  render(<Book session={{}} book={{ ...book, author: 'George Eliot', moods: ['Dark', 'Tense'], genres: ['Classics'], release_year: 1871 }} books={[book]} onChange={onChange} />)
+  openBookAction('Edit details')
+  const mood = screen.getByRole('textbox', { name: 'Add a mood' })
+  fireEvent.change(mood, { target: { value: 'Hopeful' } })
+  fireEvent.keyDown(mood, { key: 'Enter' })
+  fireEvent.change(mood, { target: { value: 'dark' } })  // already there, whatever the case
+  fireEvent.keyDown(mood, { key: 'Enter' })
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Tense' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Classics' }))  // emptied: saved empty
+  fireEvent.change(screen.getByRole('textbox', { name: 'Release year' }), { target: { value: '1872' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(api.setInfo).toHaveBeenCalledWith({}, 'book', { moods: ['Dark', 'Hopeful'], genres: [], release_year: 1872 }))
+  await waitFor(() => expect(onChange).toHaveBeenCalled())
+})
+
+it('edits only the author of a book without a stored title', async () => {
+  api.setInfo.mockResolvedValue({})
+  render(<Book session={{}} book={{ document: 'book', filename: 'scan.epub', percentage: 0.1 }} books={[]} onChange={vi.fn()} />)
+  openBookAction('Edit details')
+  fireEvent.change(screen.getByRole('textbox', { name: 'Author' }), { target: { value: 'Tove Jansson' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(api.setInfo).toHaveBeenCalledWith({}, 'book', { author: 'Tove Jansson' }))
 })

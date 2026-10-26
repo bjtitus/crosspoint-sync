@@ -3,11 +3,31 @@ import { BookOpen, CircleAlert, CircleCheck, CircleX, Pause, Share, Share2, X } 
 import { api, isApp } from './api.js'
 import { useSheet } from './tabbar.js'
 
+// Pins the page while any sheet is open: focusing a field in a sheet would otherwise scroll the page behind it.
+let pinnedSheets = 0
+let pinnedY = 0
+function usePinnedPage() {
+  useEffect(() => {
+    if (pinnedSheets++ === 0) {
+      pinnedY = window.scrollY
+      Object.assign(document.body.style, { position: 'fixed', top: `-${pinnedY}px`, left: '0', right: '0' })
+    }
+    return () => {
+      if (--pinnedSheets === 0) {
+        Object.assign(document.body.style, { position: '', top: '', left: '', right: '' })
+        window.scrollTo(0, pinnedY)
+      }
+    }
+  }, [])
+}
+
 export function Sheet({ title, onClose, children }) {
+  usePinnedPage()
   useSheet()
   const dialogRef = useRef(null)
   const previousFocus = useRef(document.activeElement)
   const [visible, setVisible] = useState(null)
+  const [keyboard, setKeyboard] = useState(false)
   useEffect(() => {
     // iOS lays the keyboard over the page instead of resizing it, so fit the sheet into what stays visible.
     const vv = window.visualViewport
@@ -15,6 +35,7 @@ export function Sheet({ title, onClose, children }) {
     const update = () => {
       const covered = window.innerHeight - vv.height - vv.offsetTop
       setVisible(covered > 1 ? { top: vv.offsetTop, bottom: covered } : null)
+      setKeyboard(window.innerHeight - vv.height > 150)
     }
     vv.addEventListener('resize', update)
     vv.addEventListener('scroll', update)
@@ -23,6 +44,13 @@ export function Sheet({ title, onClose, children }) {
       vv.removeEventListener('scroll', update)
     }
   }, [])
+  // With the keyboard up, iOS shows the page around the keyboard's floating bar, below where fixed elements
+  // are drawn. Hiding the page there leaves the plain background, the sheet's own colour.
+  useEffect(() => {
+    if (!keyboard) return
+    document.documentElement.classList.add('sheet-typing')
+    return () => document.documentElement.classList.remove('sheet-typing')
+  }, [keyboard])
   useEffect(() => {
     const dialog = dialogRef.current
     const isTopmost = () => [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].at(-1) === dialog
@@ -51,13 +79,17 @@ export function Sheet({ title, onClose, children }) {
     return () => {
       document.removeEventListener('focusin', keepFocus)
       document.removeEventListener('keydown', trapTab)
-      if (previousFocus.current?.isConnected) previousFocus.current.focus()
+      if (previousFocus.current?.isConnected) previousFocus.current.focus({ preventScroll: true })
     }
   }, [])
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center md:items-center" style={visible ?? undefined}>
+    <div className="sheet-layer fixed inset-0 z-40 flex items-end justify-center md:items-center" style={visible ?? undefined}>
       <div className="absolute inset-0 bg-stone-950/40" onClick={onClose} />
-      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={visible ? { maxHeight: 'calc(100% - env(safe-area-inset-top) - 0.75rem)', paddingBottom: '5rem' } : undefined} className="relative max-h-[88dvh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] bg-stone-50 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-lg md:rounded-[28px] md:p-6">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={{
+          ...(visible && { maxHeight: 'calc(100% - env(safe-area-inset-top) - 0.75rem)' }),
+          // Over the keyboard the last row sits close to its bar; the home-indicator inset is hidden anyway.
+          ...(keyboard && { paddingBottom: '0.25rem' }),
+        }} className="relative max-h-[88dvh] w-full overflow-y-auto overscroll-contain rounded-t-[28px] bg-stone-50 [clip-path:inset(0_round_28px_28px_0_0)] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:max-w-lg md:rounded-[28px] md:[clip-path:inset(0_round_28px)] md:p-6">
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-stone-300 md:hidden" />
         <button onClick={onClose} className="absolute top-3 right-3 grid size-10 place-items-center rounded-full text-stone-500 active:bg-stone-200" aria-label="Close">
           <X className="size-5" />
@@ -301,7 +333,7 @@ export function Toaster() {
   if (!toast) return null
   const Icon = toast.error ? CircleAlert : CircleCheck
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6 md:pl-60 lg:pl-64">
+    <div className="toast-layer pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 md:bottom-6 md:pl-60 lg:pl-64">
       <button
         key={toast.id}
         type="button"

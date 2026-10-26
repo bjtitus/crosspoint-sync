@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CalendarDays, Hash, MoreHorizontal, PenLine, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Star } from 'lucide-react'
+import { ArrowLeft, CalendarDays, MoreHorizontal, PenLine, Split, Trash2, Image as ImageIcon, Loader2, Merge, Quote, Search, Star, X } from 'lucide-react'
 import { api, isApp } from './api.js'
 import { renderCard } from './shareCard.js'
 import { isPace, moodEmoji } from './moods.js'
@@ -472,38 +472,152 @@ function DatesSheet({ session, book, activity: a, onDone, onClose }) {
   )
 }
 
-// Title and author by hand, for books the reader synced with a title the lookups can't
-// find (say, a translation). The edit sticks over later device syncs, and the cover,
-// page count and catalog details are looked up again with it.
-function DetailsSheet({ session, book, onDone, onClose }) {
+// Lists Hardcover fills in, with the server's limits (API.md: PUT /documents/{document}/info).
+const LIST_FIELDS = [
+  { key: 'genres', label: 'Genres', max: 10, placeholder: 'Add a genre' },
+  { key: 'moods', label: 'Moods', max: 12, placeholder: 'Add a mood' },
+  { key: 'content_warnings', label: 'Content warnings', max: 12, placeholder: 'Add a warning' },
+]
+
+function ChipField({ label, items, onChange, max, placeholder }) {
+  const [draft, setDraft] = useState('')
+  const full = items.length >= max
+  function add() {
+    const name = draft.trim().slice(0, 64)
+    if (!name || full) return
+    if (!items.some((i) => i.toLowerCase() === name.toLowerCase())) onChange([...items, name])
+    setDraft('')
+  }
+  return (
+    <div>
+      <p className="text-sm font-medium text-stone-700">{label}</p>
+      {items.length > 0 && (
+        <ul className="mt-1.5 flex flex-wrap gap-2" aria-label={label}>
+          {items.map((name) => (
+            <li key={name} className="flex items-center gap-1 rounded-full bg-stone-100 py-1 pr-1 pl-3 text-sm text-stone-800">
+              {name}
+              <button type="button" aria-label={`Remove ${name}`} onClick={() => onChange(items.filter((i) => i !== name))} className="grid size-7 place-items-center rounded-full text-stone-500 active:bg-stone-200">
+                <X className="size-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-1.5 flex gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              add()
+            }
+          }}
+          onBlur={add}
+          disabled={full}
+          placeholder={full ? `Up to ${max}` : placeholder}
+          aria-label={placeholder}
+          enterKeyHint="done"
+          className={field}
+        />
+        <button type="button" onClick={add} disabled={full || !draft.trim()} className="h-11 shrink-0 rounded-xl px-4 text-sm font-semibold text-brand-600 ring-1 ring-stone-950/10 disabled:opacity-40">
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const sameList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i])
+
+// Every detail but the cover and reading dates, in one form. Only changed fields are sent: an emptied list or
+// description is saved empty, while a cleared series, year or page count goes back to the lookup. A new title
+// sticks over later device syncs and the cover and catalog details are looked up again with it.
+function EditDetailsSheet({ session, book: current, onDone, onClose }) {
+  const [book] = useState(current) // the values the form opened with, so a background refresh is not saved as an edit
+  const [about] = useLoad(() => api.about(session, book.document), [book.document], `about ${book.document}`)
   const [title, setTitle] = useState(book.title ?? '')
   const [author, setAuthor] = useState(book.author ?? '')
+  const [lists, setLists] = useState(() => Object.fromEntries(LIST_FIELDS.map((f) => [f.key, book[f.key] ?? []])))
+  const [description, setDescription] = useState(null) // null until edited: the stored one loads separately
+  const [series, setSeries] = useState(book.series ?? '')
+  const [position, setPosition] = useState(book.series_position ?? '')
+  const [year, setYear] = useState(book.release_year ?? '')
+  const [pages, setPages] = useState(book.page_count ?? '')
   const [saving, setSaving] = useState(false)
+  const shownDescription = description ?? about?.description ?? ''
+
   async function save(e) {
     e.preventDefault()
-    if (!title.trim()) return notify({ error: true, title: 'A title is needed' })
+    const titleChanged = title.trim() !== (book.title ?? '')
+    if (titleChanged && !title.trim()) return notify({ error: true, title: 'A title is needed' })
+    const n = String(position).trim() === '' ? null : Number(String(position).replace(',', '.'))
+    if (n !== null && !(n >= 0 && n <= 10000)) return notify({ error: true, title: 'The series number is from 0 to 10000' })
+    const y = String(year).trim() === '' ? null : parseInt(year, 10)
+    if (y !== null && !(y >= 1 && y <= 9999)) return notify({ error: true, title: 'Enter a release year' })
+    const p = String(pages).trim() === '' ? null : parseInt(pages, 10)
+    if (p !== null && !(p > 0 && p <= 100000)) return notify({ error: true, title: 'Enter the number of pages' })
+
+    const patch = {}
+    if (titleChanged) patch.title = title.trim()
+    if (author.trim() !== (book.author ?? '')) patch.author = author.trim()
+    for (const f of LIST_FIELDS) if (!sameList(lists[f.key], book[f.key] ?? [])) patch[f.key] = lists[f.key]
+    if (description !== null && description.trim() !== (about?.description ?? '')) patch.description = description.trim()
+    if (series.trim() !== (book.series ?? '') || n !== (book.series_position ?? null)) Object.assign(patch, series.trim() ? { series: series.trim(), series_position: n } : { series: null })
+    if (y !== (book.release_year ?? null)) patch.release_year = y
+    if (p !== (book.page_count ?? null)) patch.page_count = p
+    if (!Object.keys(patch).length) return onClose()
+
     setSaving(true)
     try {
-      await api.setInfo(session, book.document, { title: title.trim(), author: author.trim() })
-      notify({ title: 'Saved', detail: 'Looking up the cover and details again.' })
+      await api.setInfo(session, book.document, patch)
+      notify(patch.title !== undefined || patch.author !== undefined ? { title: 'Saved', detail: 'Looking up the cover and details again.' } : { title: 'Saved' })
       onDone()
-    } catch (e) {
-      notify({ error: true, title: "Couldn't save", detail: e.message })
+    } catch (err) {
+      notify({ error: true, title: "Couldn't save", detail: err.message })
       setSaving(false)
     }
   }
+
+  const label = 'block text-sm font-medium text-stone-700'
   return (
-    <Sheet title="Title & author" onClose={onClose}>
-      <p className="mt-1 text-sm text-stone-500">Use the name the book is known by, like its English title, if the cover or details can&apos;t be found.</p>
-      <form onSubmit={save} className="mt-4 space-y-3">
-        <label className="block text-sm font-medium text-stone-700">
+    <Sheet title="Edit details" onClose={onClose}>
+      <form onSubmit={save} className="mt-4 space-y-4">
+        <label className={label}>
           Title
-          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className={`${field} mt-1.5`} />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className={`${field} mt-1.5`} />
         </label>
-        <label className="block text-sm font-medium text-stone-700">
+        <label className={label}>
           Author
           <input value={author} onChange={(e) => setAuthor(e.target.value)} className={`${field} mt-1.5`} />
         </label>
+        {LIST_FIELDS.map((f) => (
+          <ChipField key={f.key} label={f.label} max={f.max} placeholder={f.placeholder} items={lists[f.key]} onChange={(items) => setLists({ ...lists, [f.key]: items })} />
+        ))}
+        <label className={label}>
+          Description
+          <textarea value={shownDescription} onChange={(e) => setDescription(e.target.value.slice(0, 6000))} rows={6} className={`${field} mt-1.5 h-auto py-2.5 leading-6`} />
+        </label>
+        <div className="grid grid-cols-[1fr_6rem] gap-3">
+          <label className={label}>
+            Series
+            <input value={series} onChange={(e) => setSeries(e.target.value)} maxLength={200} className={`${field} mt-1.5`} />
+          </label>
+          <label className={label}>
+            Number
+            <input value={position} onChange={(e) => setPosition(e.target.value.replace(/[^\d.,]/g, ''))} inputMode="decimal" placeholder="e.g. 2" className={`${field} mt-1.5`} />
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className={label}>
+            Release year
+            <input value={year} onChange={(e) => setYear(e.target.value.replace(/\D/g, '').slice(0, 4))} inputMode="numeric" placeholder="e.g. 1945" className={`${field} mt-1.5`} />
+          </label>
+          <label className={label}>
+            Print pages
+            <input value={pages} onChange={(e) => setPages(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="e.g. 384" className={`${field} mt-1.5`} />
+          </label>
+        </div>
         <button disabled={saving} className="flex h-11 w-full items-center justify-center rounded-xl bg-brand-500 text-sm font-semibold text-white disabled:opacity-60">
           {saving ? <Loader2 className="size-4 animate-spin" /> : 'Save'}
         </button>
@@ -514,27 +628,13 @@ function DetailsSheet({ session, book, onDone, onClose }) {
 
 function BookMenu({ session, book, books, activity, onChange }) {
   const [action, setAction] = useState(null)
+  const [open, setOpen] = useState(null) // 'edit' | 'cover' | 'dates' | 'merge'
   const [menu, setMenu] = useState(false)
   useNativeButton('more', { sfSymbol: 'ellipsis', anchor: 'topTrailing' }, () => setMenu((m) => !m))
-  const [open, setOpen] = useState(null) // 'cover' | 'details' | 'pages' | 'dates' | 'merge'
-  const [pages, setPages] = useState(book.page_count ?? '')
-  const [saving, setSaving] = useState(false)
   const dupes = books.filter((b) => looksLikeSame(book, b)).length
   const done = () => {
     setOpen(null)
     onChange()
-  }
-  async function savePages(e) {
-    e.preventDefault()
-    const n = parseInt(pages, 10)
-    if (!(n > 0)) return
-    setSaving(true)
-    try {
-      await api.setInfo(session, book.document, { page_count: n })
-      done()
-    } finally {
-      setSaving(false)
-    }
   }
   const item = (Icon, label, run, extra = null, danger = false) => (
     <button
@@ -567,10 +667,9 @@ function BookMenu({ session, book, books, activity, onChange }) {
         <>
           <div className="fixed inset-0 z-30" onClick={() => setMenu(false)} />
           <div role="menu" className="native-menu absolute top-12 right-0 z-30 w-64 divide-y divide-stone-100 overflow-hidden rounded-xl bg-surface shadow-lg ring-1 ring-stone-950/10">
-            {item(PenLine, 'Edit title & author', () => setOpen('details'))}
+            {item(PenLine, 'Edit details', () => setOpen('edit'))}
             {item(ImageIcon, 'Change cover', () => setOpen('cover'))}
             {item(CalendarDays, 'Reading dates', () => setOpen('dates'))}
-            {item(Hash, 'Print pages', () => setOpen('pages'), <span className="ml-auto font-mono text-xs text-stone-500">{book.page_count ?? '?'}</span>)}
             {item(
               Merge,
               'Merge a duplicate',
@@ -612,18 +711,7 @@ function BookMenu({ session, book, books, activity, onChange }) {
       {open === 'cover' && <CoverPicker session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'dates' && <DatesSheet session={session} book={book} activity={activity} onDone={done} onClose={() => setOpen(null)} />}
       {open === 'merge' && <MergePicker session={session} book={book} books={books} onDone={done} onClose={() => setOpen(null)} />}
-      {open === 'details' && <DetailsSheet session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
-      {open === 'pages' && (
-        <Sheet title="Print pages" onClose={() => setOpen(null)}>
-          <p className="mt-1 text-sm text-stone-500">The printed edition&apos;s page count, used for pages read and stats.</p>
-          <form onSubmit={savePages} className="mt-4 flex gap-2">
-            <input autoFocus value={pages} onChange={(e) => setPages(e.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="e.g. 384" className={field} />
-            <button disabled={saving} className="h-11 shrink-0 rounded-xl bg-brand-500 px-5 text-sm font-semibold text-white disabled:opacity-60">
-              Save
-            </button>
-          </form>
-        </Sheet>
-      )}
+      {open === 'edit' && <EditDetailsSheet session={session} book={book} onDone={done} onClose={() => setOpen(null)} />}
     </div>
   )
 }
@@ -754,8 +842,8 @@ function Services({ session, book, onSync }) {
   )
 }
 
-function About({ session, book }) {
-  const [data] = useLoad(() => api.about(session, book.document), [book.document], `about ${book.document}`)
+function About({ session, book, revision }) {
+  const [data] = useLoad(() => api.about(session, book.document), [book.document, revision], `about ${book.document}`)
   const [open, setOpen] = useState(false)
   const [long, setLong] = useState(false)
   const text = useRef(null)
@@ -835,7 +923,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
         >
           <ArrowLeft className="size-6" strokeWidth={2} /> {back.label}
         </a>
-        <BookMenu key={`${book.document}-${book.page_count}`} session={session} book={book} books={books} activity={activity} onChange={onChange} />
+        <BookMenu key={book.document} session={session} book={book} books={books} activity={activity} onChange={synced} />
       </div>
       {/* One column at every size: the book up top, its cards two-up on wide screens, clippings below. */}
       <div className="md:mt-4">
@@ -866,7 +954,7 @@ export default function Book({ session, book, books, activity, back = { href: '#
               <StatusPicker session={session} book={book} onChange={onChange} />
             </div>
           </div>
-          <About session={session} book={book} />
+          <About session={session} book={book} revision={revision} />
           {/* Cards flow two-up; spacing moves to the bottom so a column break can't eat a top margin. */}
           <div className="md:mt-4 md:columns-2 md:gap-4 md:[&>*]:mt-0 md:[&>*]:mb-4 [&>*]:break-inside-avoid">
             <Details book={book} />
