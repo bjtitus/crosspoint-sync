@@ -757,7 +757,7 @@ function Details({ book }) {
   )
 }
 
-// The book's description (from Hardcover), clamped with Read more when it's long.
+// The book's description (from Hardcover or set by hand), clamped with Read more when it's long.
 // Beyond this book: the next one in its series, and where this one syncs to
 // (its match at each linked service, fixable in place).
 function Services({ session, book, onSync }) {
