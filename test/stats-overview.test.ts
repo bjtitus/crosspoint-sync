@@ -48,6 +48,29 @@ describe('GET /api/v1/stats/overview', () => {
     expect((await (await app.request('/api/v1/stats/overview?days=99999', { headers })).json()).days).toBe(3650);
   });
 
+  it('counts week_seconds from Monday with week_start=1', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-24T18:00:00Z')); // a Saturday
+    const { app } = makeTestApp();
+    const { headers } = await registerUser(app);
+    const global = {
+      device_id: 'x4', device: 'CrossPoint', v: 5, sessions: 0, seconds: 1440, pages: 0, completed: 0,
+      tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0], anchor_day: 0, history_b64: '', streak: 0,
+      daily: [
+        { date: '2026-10-18', seconds: 600 }, // Sunday: last week
+        { date: '2026-10-19', seconds: 300 }, // Monday
+        { date: '2026-10-24', seconds: 540 },
+      ],
+    };
+    expect((await app.request('/api/v1/stats/global', { method: 'PUT', headers, body: JSON.stringify(global) })).status).toBe(200);
+
+    const rolling = await (await app.request('/api/v1/stats/overview?days=10', { headers })).json();
+    expect(rolling.week_seconds).toBe(1440);
+    const fromMonday = await (await app.request('/api/v1/stats/overview?days=10&week_start=1', { headers })).json();
+    expect(fromMonday.week_seconds).toBe(840);
+    expect((await app.request('/api/v1/stats/overview?week_start=0', { headers })).status).toBe(403);
+  });
+
   it('narrows to books by language, genre or author, and groups by language', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-24T18:00:00Z'));
