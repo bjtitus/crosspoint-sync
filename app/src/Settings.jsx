@@ -505,9 +505,10 @@ function Service({ session, conn, onChange }) {
               onClick={() =>
                 act('sync', async () => {
                   const r = await api.syncConnector(session, conn.id)
+                  const queued = r?.queued ? `${r.queued} item${r.queued === 1 ? '' : 's'} queued` : 'No synced items to queue'
                   notify({
                     title: `Syncing to ${conn.name}`,
-                    detail: r?.queued ? `${r.queued} item${r.queued === 1 ? '' : 's'} queued` : 'No synced items to queue',
+                    detail: r?.pulled === undefined ? queued : `${r.pulled} position${r.pulled === 1 ? '' : 's'} pulled, ${queued.toLowerCase()}`,
                   })
                 })
               }
@@ -640,6 +641,63 @@ function Services({ session }) {
       {list.map((conn) => (
         <Service key={conn.id} session={session} conn={conn} onChange={reload} />
       ))}
+    </Card>
+  )
+}
+
+// Pause books in progress after N days without new progress (0 = never).
+function AutoPause({ session }) {
+  const [data, error, reload] = useLoad(() => api.autoPause(session), [session], `auto-pause ${session.username}@${session.server}`)
+  const [draft, setDraft] = useState(null) // the typed days while editing, else the saved value shows
+  const [busy, setBusy] = useState(false)
+  if (error && !data) return <p className="py-4 text-sm text-stone-500">Couldn&apos;t load this setting ({error.message}).</p>
+  if (!data) return <Loader2 className="mx-auto my-6 size-5 animate-spin text-stone-400" />
+  const save = async (next) => {
+    setDraft(null)
+    if (next === data.days) return
+    setBusy(true)
+    try {
+      await api.setAutoPause(session, next)
+      reload()
+    } catch (e) {
+      notify({ error: true, title: "That didn't work", detail: e.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const commit = () => {
+    const n = Number(draft)
+    if (draft !== null && Number.isInteger(n) && n >= 1 && n <= 365) save(n)
+    else setDraft(null)
+  }
+  return (
+    <Card className="mt-3 divide-y divide-stone-100">
+      <label className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800">
+        <span className="flex-1">Auto-pause idle books</span>
+        {busy ? (
+          <Loader2 className="size-5 animate-spin text-stone-400" />
+        ) : (
+          <Toggle checked={data.days > 0} label="Auto-pause idle books" onChange={(on) => save(on ? 30 : 0)} />
+        )}
+      </label>
+      {data.days > 0 && (
+        <label className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-stone-800">
+          <span className="flex-1">Days without progress</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min="1"
+            max="365"
+            aria-label="Days without progress"
+            value={draft ?? String(data.days)}
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            className="h-9 w-20 rounded-lg bg-stone-100 px-3 text-right text-sm tabular-nums text-stone-900 outline-none focus:ring-2 focus:ring-brand-300"
+          />
+        </label>
+      )}
     </Card>
   )
 }
@@ -850,6 +908,10 @@ export default function Settings({ session, theme, onSession, onLogout }) {
       <div className="mt-3">
         <Appearance theme={theme} />
       </div>
+
+      <h2 className={section}>Reading</h2>
+      <p className="mt-1 text-sm text-stone-500">Books with no new progress for this long are marked Paused. Syncing a new position un-pauses them.</p>
+      <AutoPause session={session} />
 
       <h2 className={section}>Connected services</h2>
       <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>

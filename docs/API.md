@@ -866,7 +866,19 @@ three recent grouped failures for that user's service, including pending retries
 failed items. Completed items no longer contribute errors. Settings shows waiting/failed counts
 and these messages, refreshing every five seconds while work is pending. The "Sync now" response's
 `queued` value counts export items (progress and individual clippings), not distinct books or
-successful deliveries. "Sync now" also requeues failed items for another attempt.
+successful deliveries. "Sync now" also requeues failed items for another attempt. For
+Audiobookshelf it first pulls every matched book's position (the response adds `pulled`); the
+server also pulls those positions every 15 minutes, so listening shows up without opening the book
+on a reader.
+
+### Auto-pause
+
+Books in progress (status unset or `reading`) with no new position for the account's
+auto-pause days become `paused` with `pause_reason: "auto"`; any new position un-pauses them.
+`GET /api/v1/account/auto-pause` returns `{ "days": 30 }` (the default). `PUT` with
+`{ "days": 0-365 }` sets it (`0` = never, `null` = back to the default). Changing it applies at
+once: auto-paused books the new window no longer covers go back to reading, and books now past it
+are paused. Manual pauses are left alone.
 
 ### Public profile
 

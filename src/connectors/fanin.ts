@@ -241,13 +241,14 @@ export async function spotifyFirstSync(db: DB, userId: number, http: HttpTranspo
 }
 
 /**
- * Jellyfin's hourly pull (same shape as pollSpotify): per-match UserData for every
- * user with a matched book. Progress requests still pull on demand.
+ * A per-book connector's background pull (Jellyfin, Audiobookshelf): every
+ * matched book of every user, so positions land without a device asking.
+ * Progress requests still pull on demand.
  */
-export async function pollJellyfin(db: DB, http: HttpTransport = fetchTransport): Promise<number> {
+export async function pollMatched(db: DB, connectorId: string, http: HttpTransport = fetchTransport): Promise<number> {
   let total = 0;
-  for (const userId of usersWithMatches(db, 'jellyfin', false)) {
-    total += await pollConnector(db, userId, 'jellyfin', http);
+  for (const userId of usersWithMatches(db, connectorId, false)) {
+    total += await pollConnector(db, userId, connectorId, http);
   }
   return total;
 }

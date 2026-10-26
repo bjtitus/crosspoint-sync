@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 const env = vi.hoisted(() => ({ isApp: false }))
 vi.mock('./api.js', () => ({
   get isApp() { return env.isApp },
-  api: { oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn() },
+  api: { oauthBegin: vi.fn(), oauthComplete: vi.fn(), connectors: vi.fn(), linkConnector: vi.fn(), setClientId: vi.fn(), removeClientId: vi.fn(), syncConnector: vi.fn(), unlinkConnector: vi.fn(), clearData: vi.fn(), deleteAccount: vi.fn(), autoPause: vi.fn(), setAutoPause: vi.fn() },
 }))
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }))
 let deliver = null
@@ -331,5 +331,27 @@ describe('in-app destructive confirmations', () => {
     expect(api.deleteAccount).toHaveBeenNthCalledWith(2, reader)
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(window.prompt).not.toHaveBeenCalled()
+  })
+})
+
+describe('auto-pause setting', () => {
+  const renderSettings = () => render(<Settings session={{ ...session, username: 'reader' }} theme={['system', vi.fn()]} onSession={vi.fn()} onLogout={vi.fn()} />)
+
+  it('saves the days on blur, ignores invalid input, and turns off with the toggle', async () => {
+    api.connectors.mockResolvedValue({ connectors: [] })
+    api.autoPause.mockResolvedValue({ days: 30 })
+    api.setAutoPause.mockResolvedValue({})
+    renderSettings()
+    const input = await screen.findByRole('spinbutton', { name: 'Days without progress' })
+    expect(input.value).toBe('30')
+    fireEvent.change(input, { target: { value: '0' } })
+    fireEvent.blur(input)
+    expect(input.value).toBe('30')
+    fireEvent.change(input, { target: { value: '3' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(api.setAutoPause).toHaveBeenCalledWith(expect.anything(), 3))
+    api.autoPause.mockResolvedValue({ days: 3 })
+    fireEvent.click(await screen.findByRole('switch', { name: 'Auto-pause idle books' }))
+    await waitFor(() => expect(api.setAutoPause).toHaveBeenLastCalledWith(expect.anything(), 0))
   })
 })

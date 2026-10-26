@@ -5,7 +5,7 @@ import { migrate, openDatabase } from './db/db.js';
 import { secretsEnabled } from './crypto/secrets.js';
 import { loadSessionSecret } from './auth/session.js';
 import { startQueueWorker } from './connectors/runner.js';
-import { pollJellyfin, pollSpotify, startFanInWorker } from './connectors/fanin.js';
+import { pollMatched, pollSpotify, startFanInWorker } from './connectors/fanin.js';
 import { autoPause } from './models/pause.js';
 
 const DATABASE_PATH = process.env.DATABASE_PATH ?? '/data/crosspoint.db';
@@ -26,11 +26,12 @@ if (connectorsEnabled) {
   // Fan-in: pull position changes back from bidirectional connectors (e.g.
   // Audiobookshelf audiobook -> ebook).
   startFanInWorker(db, Number(process.env.FANIN_INTERVAL_MS ?? 5 * 60_000));
-  // Jellyfin and Spotify per-match pulls (hourly).
-  startFanInWorker(db, 60 * 60_000, pollJellyfin);
+  // Jellyfin and Spotify per-match pulls (hourly); Audiobookshelf every 15 minutes.
+  startFanInWorker(db, 60 * 60_000, (d) => pollMatched(d, 'jellyfin'));
+  startFanInWorker(db, 15 * 60_000, (d) => pollMatched(d, 'audiobookshelf'));
   startFanInWorker(db, 60 * 60_000, pollSpotify);
 }
-// Daily: pause books with no progress for 30 days (reads also check lazily).
+// Daily: pause books with no progress for each user's auto-pause days (reads also check lazily).
 startFanInWorker(db, 24 * 60 * 60_000, async (d) => autoPause(d));
 
 serve({ fetch: app.fetch, port: PORT, hostname: ADDRESS }, (info) => {

@@ -6,27 +6,51 @@ export const AUTO_PAUSE_DAYS = 30;
 // Matches the derived "finished" in GET /progress.
 const FINISHED = 0.98;
 
+// The user's auto-pause window in days (users.auto_pause_days, NULL = default, 0 = off).
+const daysSql = (user: string) => `(SELECT COALESCE(auto_pause_days, ${AUTO_PAUSE_DAYS}) FROM users WHERE id = ${user})`;
+
+export function autoPauseDays(db: DB, userId: number): number {
+  return (db.prepare(`SELECT ${daysSql('?')} AS days`).get(userId) as { days: number }).days;
+}
+
 /**
  * Pause books in progress (status unset or 'reading') whose position hasn't
- * moved (progress_log) for AUTO_PAUSE_DAYS. Scoped to one user, or one book;
- * all users when userId is omitted (the daily sweep).
+ * moved (progress_log) for the user's auto-pause days. Scoped to one user, or
+ * one book; all users when userId is omitted (the daily sweep).
  */
 export function autoPause(db: DB, opts: { userId?: number; document?: string } = {}, now = nowSeconds()): number {
-  const cutoff = now - AUTO_PAUSE_DAYS * 86_400;
   return Number(db.prepare(
     `INSERT INTO documents (user_id, document, status, status_at, pause_reason, updated_at)
      SELECT l.user_id, l.document, 'paused', ?, 'auto', ?
        FROM progress_log l
       WHERE (? IS NULL OR l.user_id = ?) AND (? IS NULL OR l.document = ?)
       GROUP BY l.user_id, l.document
-     HAVING MAX(l.at) < ?
+     HAVING ${daysSql('l.user_id')} > 0
+        AND MAX(l.at) < ? - ${daysSql('l.user_id')} * 86400
         AND NOT ${completedBookStatsSql('l.user_id', 'l.document')}
         AND (SELECT p.percentage FROM progress p WHERE p.user_id = l.user_id AND p.document = l.document
               ORDER BY p.updated_at DESC, p.device_id LIMIT 1) < ${FINISHED}
      ON CONFLICT(user_id, document) DO UPDATE SET
        status = 'paused', status_at = excluded.status_at, pause_reason = 'auto'
       WHERE documents.status IS NULL OR documents.status = 'reading'`
-  ).run(now, now, opts.userId ?? null, opts.userId ?? null, opts.document ?? null, opts.document ?? null, cutoff).changes);
+  ).run(now, now, opts.userId ?? null, opts.userId ?? null, opts.document ?? null, opts.document ?? null, now).changes);
+}
+
+/**
+ * Change the user's auto-pause days (null = default, 0 = off). Books it had
+ * auto-paused that the new window no longer covers go back to reading; then the
+ * new window is applied.
+ */
+export function setAutoPauseDays(db: DB, userId: number, days: number | null, now = nowSeconds()): void {
+  db.prepare('UPDATE users SET auto_pause_days = ? WHERE id = ?').run(days, userId);
+  db.prepare(
+    `UPDATE documents SET status = NULL, status_at = ?, pause_reason = NULL
+      WHERE user_id = ? AND status = 'paused' AND pause_reason = 'auto'
+        AND (${daysSql('documents.user_id')} = 0
+             OR (SELECT MAX(l.at) FROM progress_log l WHERE l.user_id = documents.user_id AND l.document = documents.document)
+                >= ? - ${daysSql('documents.user_id')} * 86400)`
+  ).run(now, userId, now);
+  autoPause(db, { userId }, now);
 }
 
 /** New progress unpauses a book, whoever paused it (pause_reason is kept for when that changes). */

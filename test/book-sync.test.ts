@@ -4,6 +4,7 @@ import { getConnector } from '../src/connectors/registry.js';
 import { saveMatch, upsertAccount } from '../src/connectors/store.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import { upsertProgress } from '../src/routes/kosync.js';
+import { pollMatched } from '../src/connectors/fanin.js';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 
 beforeEach(() => { process.env.TOKEN_ENC_KEY = 'c'.repeat(64); resetEncryptionKeyCache(); });
@@ -84,4 +85,22 @@ it.each(['audiobookshelf', 'readwise-reader'])('%s HTTP failures cannot be mista
   f.http.mockImplementation(async () => ({ status: 503, json: async () => ({}), text: async () => 'Unavailable' }));
   expect((await f.sync()).status).toBe(502);
   expect(f.db.prepare('SELECT * FROM connector_queue').all()).toHaveLength(0);
+});
+
+it('Audiobookshelf "Sync now" pulls every matched book before queueing, and so does the background poll', async () => {
+  const f = await fixture('audiobookshelf');
+  const pull = vi.spyOn(getConnector('audiobookshelf')!, 'pullProgress').mockImplementation(async (_cred, match) => {
+    expect(f.db.prepare('SELECT * FROM connector_queue').all()).toHaveLength(0);
+    return match.externalId === DOC ? { externalId: DOC, percentage: 0.5, finished: false, updatedAtMs: 200000 } : null;
+  });
+  const res = await f.app.request('/api/v1/connectors/audiobookshelf/sync', { method: 'POST', headers: f.headers });
+  expect(await res.json()).toEqual({ pulled: 1, queued: 2 });
+  expect(pull).toHaveBeenCalledTimes(2);
+  const pct = () => f.db.prepare("SELECT percentage FROM progress WHERE document = ? AND device_id = 'audiobookshelf'").get(DOC);
+  expect(pct()).toEqual({ percentage: 0.5 });
+
+  pull.mockImplementation(async (_cred, match) =>
+    match.externalId === DOC ? { externalId: DOC, percentage: 0.6, finished: false, updatedAtMs: 300000 } : null);
+  expect(await pollMatched(f.db, 'audiobookshelf')).toBe(1);
+  expect(pct()).toEqual({ percentage: 0.6 });
 });

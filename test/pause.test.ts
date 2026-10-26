@@ -175,3 +175,52 @@ describe('auto-finish', () => {
     expect((await re.book()).status).toBe('reading');
   });
 });
+
+describe('auto-pause days setting', () => {
+  const setDays = (app: any, headers: any, days: unknown) => app.request('/api/v1/account/auto-pause', {
+    method: 'PUT', headers, body: JSON.stringify({ days }),
+  });
+
+  it('defaults to 30, pauses on the chosen days, and validates', async () => {
+    const { app, headers, push, book } = await reader();
+    expect(await (await app.request('/api/v1/account/auto-pause', { headers })).json()).toEqual({ days: 30 });
+    expect((await setDays(app, headers, 3)).status).toBe(200);
+    for (const bad of [-1, 1.5, '3', 366, undefined]) expect((await setDays(app, headers, bad)).status).toBe(400);
+    await push(0.4);
+    at(3 * DAY);
+    expect((await book()).status).toBe('reading');
+    at(3 * DAY + 1000);
+    expect(await book()).toEqual({ status: 'paused', pause_reason: 'auto' });
+    await push(0.45);
+    expect((await book()).status).toBe('reading');
+  });
+
+  it('0 turns it off; a longer window or off un-pauses books it no longer covers', async () => {
+    const { app, headers, push, book, setStatus } = await reader();
+    await push(0.4);
+    await setDays(app, headers, 3);
+    at(5 * DAY);
+    expect((await book()).status).toBe('paused');
+    await setDays(app, headers, 10);
+    expect(await book()).toEqual({ status: 'reading', pause_reason: null });
+    await setDays(app, headers, 0);
+    at(100 * DAY);
+    expect((await book()).status).toBe('reading');
+
+    await setStatus('paused'); // a manual pause is left alone
+    await setDays(app, headers, null);
+    expect(await book()).toEqual({ status: 'paused', pause_reason: 'manual' });
+  });
+
+  it('the daily sweep uses each user\'s own window', async () => {
+    const a = await reader();
+    await a.push(0.4);
+    await setDays(a.app, a.headers, 3);
+    const { headers } = await registerUser(a.app);
+    await a.app.request('/syncs/progress', {
+      method: 'PUT', headers, body: JSON.stringify({ document: DOC, progress: '/x', percentage: 0.2, device: 'r', device_id: 'r2' }),
+    });
+    at(4 * DAY);
+    expect(autoPause(a.db)).toBe(1);
+  });
+});

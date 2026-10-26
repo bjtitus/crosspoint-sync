@@ -3,6 +3,7 @@ import type { DB } from '../../db/db.js';
 import { invalidateAuthCache, type AppEnv } from '../../auth/middleware.js';
 import { hashKey } from '../../auth/password.js';
 import { deleteKosyncUserData } from '../account.js';
+import { autoPauseDays, setAutoPauseDays } from '../../models/pause.js';
 
 /**
  * The signed-in sync account, for the app (which signs in with the sync
@@ -27,6 +28,24 @@ export function meRoutes(db: DB): Hono<AppEnv> {
     db.prepare('UPDATE users SET key_hash = ? WHERE id = ?').run(hashKey(key.toLowerCase()), user.id);
     invalidateAuthCache(user.username);
     return c.json({ username: user.username });
+  });
+
+  // Days without progress before a book in progress is paused (0 = never).
+  app.get('/account/auto-pause', (c) => c.json({ days: autoPauseDays(db, c.get('user').id) }));
+
+  app.put('/account/auto-pause', async (c) => {
+    const user = c.get('user');
+    let days: unknown;
+    try {
+      days = ((await c.req.json()) as Record<string, unknown>).days;
+    } catch {
+      /* validated below */
+    }
+    if (days !== null && !(Number.isInteger(days) && (days as number) >= 0 && (days as number) <= 365)) {
+      return c.json({ code: 2003, message: 'Send { days: 0-365 } (0 = never, null = default)' }, 400);
+    }
+    setAutoPauseDays(db, user.id, days as number | null);
+    return c.json({ days: autoPauseDays(db, user.id) });
   });
 
   // Wipe reading data (progress, clippings, stats, linked services) but keep the account.

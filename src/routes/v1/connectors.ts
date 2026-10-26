@@ -486,12 +486,22 @@ export function connectorRoutes(
   });
 
   // "Sync now": backfill this connector with everything already synced.
-  app.post('/connectors/:id/sync', (c) => {
+  // Audiobookshelf first pulls every matched book's position, so newer listening
+  // there isn't overwritten by the backfill.
+  app.post('/connectors/:id/sync', async (c) => {
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
     const user = c.get('user');
     if (!getAccount(db, user.id, conn.id)) {
       return c.json({ code: 2003, message: 'Connector not linked' }, 400);
+    }
+    if (conn.id === 'audiobookshelf') {
+      // Per-book failures are logged and skipped; a revoked key marks the account needs_reauth.
+      const signal = AbortSignal.timeout(60_000);
+      const bounded: HttpTransport = (url, init) => transport(url, { ...init,
+        signal: init.signal ? AbortSignal.any([signal, init.signal]) : signal });
+      const pulled = await pollConnector(db, user.id, conn.id, bounded, { signal }).catch(() => 0);
+      return c.json({ pulled, queued: backfillConnector(db, user.id, conn.id) });
     }
     const queued = backfillConnector(db, user.id, conn.id);
     if (conn.id === 'bookorbit') {
