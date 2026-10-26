@@ -421,7 +421,7 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     if (
       filter === null ||
       (groupBy !== undefined && groupBy !== 'language' && groupBy !== 'genre') ||
-      (weekStart !== undefined && weekStart !== '1')
+      (weekStart !== undefined && weekStart !== '0' && weekStart !== '1')
     ) {
       return kosyncError(c, 403, 2003, 'Invalid request');
     }
@@ -429,8 +429,9 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     const day = (t: number) => Math.floor(t / 86400000) - EPOCH_DAY; // days since 2000-01-01
     const today = day(Date.now() - tz * 60000);
     const year = new Date(Date.now() - tz * 60000).getUTCFullYear();
-    // week_seconds: the last 7 days, or with week_start=1 the days since Monday (2000-01-01 was a Saturday).
-    const weekDays = weekStart === '1' ? ((today + 5) % 7) + 1 : 7;
+    // week_seconds: the last 7 days, or the days since Sunday (week_start=0) or Monday (1).
+    // 2000-01-01 was a Saturday, so (today + 6) % 7 is the weekday with Sunday as 0.
+    const weekDays = weekStart === undefined ? 7 : ((today + 6 - Number(weekStart)) % 7) + 1;
 
     const digest = (read: Set<number>, books: typeof activity.books, pages: number, time: OverviewTime) => {
       const past = [...read].filter((d) => d <= today).sort((a, b) => a - b);

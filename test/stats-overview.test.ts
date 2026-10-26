@@ -48,27 +48,34 @@ describe('GET /api/v1/stats/overview', () => {
     expect((await (await app.request('/api/v1/stats/overview?days=99999', { headers })).json()).days).toBe(3650);
   });
 
-  it('counts week_seconds from Monday with week_start=1', async () => {
+  it('counts week_seconds for the calendar week with week_start', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-24T18:00:00Z')); // a Saturday
-    const { app } = makeTestApp();
-    const { headers } = await registerUser(app);
+    vi.setSystemTime(new Date('2026-10-21T18:00:00Z')); // a Wednesday
+    const { app, db } = makeTestApp();
+    const { username, headers } = await registerUser(app);
+    const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as { id: number };
+    const ja = 'a'.repeat(32);
+    db.prepare('INSERT INTO documents (user_id, document, language, updated_at) VALUES (?, ?, ?, 0)').run(id, ja, 'ja');
+    // Thursday last week, then Sunday, Monday and today.
+    const reading: [string, number][] = [['2026-10-15', 100], ['2026-10-18', 600], ['2026-10-19', 300], ['2026-10-21', 540]];
     const global = {
-      device_id: 'x4', device: 'CrossPoint', v: 5, sessions: 0, seconds: 1440, pages: 0, completed: 0,
+      device_id: 'x4', device: 'CrossPoint', v: 5, sessions: 0, seconds: 1540, pages: 0, completed: 0,
       tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0], anchor_day: 0, history_b64: '', streak: 0,
-      daily: [
-        { date: '2026-10-18', seconds: 600 }, // Sunday: last week
-        { date: '2026-10-19', seconds: 300 }, // Monday
-        { date: '2026-10-24', seconds: 540 },
-      ],
+      daily: reading.map(([date, seconds]) => ({ date, seconds })),
     };
     expect((await app.request('/api/v1/stats/global', { method: 'PUT', headers, body: JSON.stringify(global) })).status).toBe(200);
+    const items = reading.map(([date, seconds], n) => ({
+      session_id: `s${n}`, document: ja, started_at: at(date), ended_at: at(date) + seconds, seconds, utc_offset_minutes: 0,
+    }));
+    expect((await app.request('/api/v1/stats/sessions', { method: 'PUT', headers, body: JSON.stringify({ device_id: 'x4', items }) })).status).toBe(200);
 
-    const rolling = await (await app.request('/api/v1/stats/overview?days=10', { headers })).json();
-    expect(rolling.week_seconds).toBe(1440);
-    const fromMonday = await (await app.request('/api/v1/stats/overview?days=10&week_start=1', { headers })).json();
-    expect(fromMonday.week_seconds).toBe(840);
-    expect((await app.request('/api/v1/stats/overview?week_start=0', { headers })).status).toBe(403);
+    const get = async (q: string) => (await app.request(`/api/v1/stats/overview?days=10&group_by=language${q}`, { headers })).json();
+    for (const [q, seconds] of [['', 1540], ['&week_start=0', 1440], ['&week_start=1', 840]] as const) {
+      const overview = await get(q);
+      expect(overview.week_seconds).toBe(seconds);
+      expect(overview.groups.ja.week_seconds).toBe(seconds);
+    }
+    expect((await app.request('/api/v1/stats/overview?week_start=2', { headers })).status).toBe(403);
   });
 
   it('narrows to books by language, genre or author, and groups by language', async () => {
