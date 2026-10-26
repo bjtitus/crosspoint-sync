@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Download, ImagePlus, Loader2, RotateCcw, RotateCw, Search, Send as SendIcon, Sparkles, Wand2 } from 'lucide-react'
+import { ArrowLeft, Download, ImagePlus, Loader2, RotateCcw, RotateCw, Search, Send as SendIcon, Sparkles, Tablet, Wand2 } from 'lucide-react'
 import { isApp } from './api.js'
 import { reader, sendFile } from './catalogs.js'
-import { folders, loadDevicePrefs, makeFolder } from './device.js'
+import { connect, folders, loadDevicePrefs, makeFolder } from './device.js'
+import { findReader, readerFor, readers, refreshReaders } from './readers.js'
 import { saveImage } from './shareCard.js'
 import { Card, EmptyState, Eyebrow, notify } from './ui.jsx'
 import { useNativeBack } from './tabbar.js'
 import { CATEGORIES, canFilter, communityPage, fullImage } from './wallpaper/community.js'
-import { DEFAULTS, DEVICES, DITHERS, autoLevels, placement, renderWallpaper, toBmp } from './wallpaper/render.js'
+import { DEFAULTS, DITHERS, autoLevels, placement, renderWallpaper, toBmp } from './wallpaper/render.js'
 
 // Sleep-screen wallpaper creator, ported from zgredex's crosspoint-pxc-converter.
 // Settings other than the picture are remembered per device.
@@ -15,7 +16,7 @@ const PREFS = 'crosspoint-wallpaper'
 function loadPrefs() {
   try {
     const saved = JSON.parse(localStorage.getItem(PREFS)) ?? {}
-    return { ...DEFAULTS, device: saved.device ?? DEFAULTS.device, dither: saved.dither ?? DEFAULTS.dither }
+    return { ...DEFAULTS, device: readerFor(saved.device).id, dither: saved.dither ?? DEFAULTS.dither }
   } catch {
     return DEFAULTS
   }
@@ -190,6 +191,20 @@ export default function Wallpaper() {
   useNativeBack('#/send')
   const [img, setImg] = useState(null) // { el, name }
   const [s, setS] = useState(loadPrefs)
+  const [devices, setDevices] = useState(readers)
+  // Pick the connected reader's model when it's reachable; otherwise keep the saved choice.
+  useEffect(() => {
+    refreshReaders()
+      .then((list) => {
+        setDevices(list)
+        return connect(loadDevicePrefs().host)
+      })
+      .then(({ status }) => {
+        const found = findReader(status.device)
+        if (found) set({ device: found.id })
+      })
+      .catch(() => {})
+  }, [])
   const [auto, setAuto] = useState(false)
   const [status, setStatus] = useState(null) // { busy, text, error }
   const canvas = useRef(null)
@@ -327,7 +342,7 @@ export default function Wallpaper() {
     }
   }
 
-  const [w, h] = DEVICES[s.device]
+  const { width: w, height: h } = readerFor(s.device)
   const actionBase = 'flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-semibold transition active:scale-[0.98] disabled:opacity-50'
 
   return (
@@ -393,7 +408,19 @@ export default function Wallpaper() {
 
           <div className="mt-4 space-y-4 md:mt-0">
             <Card className="space-y-4 p-4">
-              <Segmented value={s.device} options={Object.keys(DEVICES).map((d) => [d, d])} onChange={(device) => set({ device })} />
+              <label className="block text-xs font-medium text-stone-500">
+                Device
+                <div className="mt-1 flex h-11 items-center gap-2 rounded-xl bg-stone-50 px-3 ring-1 ring-stone-950/10">
+                  <Tablet className="size-4 text-stone-400" />
+                  <select value={s.device} onChange={(e) => set({ device: e.target.value })} className="h-full min-w-0 flex-1 bg-transparent text-sm text-stone-900 outline-none">
+                    {devices.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.width}×{d.height})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
               <Segmented
                 value={s.mode}
                 options={[

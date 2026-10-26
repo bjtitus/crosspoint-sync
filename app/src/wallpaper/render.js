@@ -6,8 +6,7 @@ import { ditherToIndexedGray } from './dither.ts'
 import { encodeGrayBmp } from './bmpGray.ts'
 import { GRAY_DISP, getQuantProfile } from './quantize.ts'
 import { buildLuminanceBuffer, buildToneLut, computeAutoLevels } from './tone.ts'
-
-export const DEVICES = { X4: [480, 800], X3: [528, 792] }
+import { DEFAULT_READER, readerFor } from '../readers.js'
 
 export const DITHERS = [
   ['zhou-fang', 'Zhou-Fang'],
@@ -22,7 +21,7 @@ export const DITHERS = [
 ]
 
 export const DEFAULTS = {
-  device: 'X4',
+  device: DEFAULT_READER,
   mode: 'fill', // fill = crop to the screen, fit = letterbox
   zoom: 1,
   cx: 0.5, // crop centre in the rotated source, 0..1
@@ -69,7 +68,7 @@ function mipChain(img, rotation) {
 
 // Where the rotated source lands on the w x h screen.
 export function placement(img, s) {
-  const [w, h] = DEVICES[s.device]
+  const { width: w, height: h } = readerFor(s.device)
   const turned = s.rotation % 180 !== 0
   const sw = turned ? img.naturalHeight : img.naturalWidth
   const sh = turned ? img.naturalWidth : img.naturalHeight

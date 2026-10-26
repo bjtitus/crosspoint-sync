@@ -8,7 +8,7 @@ JSZip is pinned to 3.10.1, the reader's bundled version.
 
 The app runs this code locally in its WebView. It does not download or execute code
 from the connected reader. It matches the pinned reader's normal optimization mode:
-grayscale JPEG images fitted to X3 (528 × 792) or X4 (480 × 800), SVG image/cover
+grayscale JPEG images fitted to the reader's screen (sizes from `src/readers.js`), SVG image/cover
 unwrapping, font removal, and the same XHTML, CSS, OPF, and NCX transformations.
 Quality defaults to 85; existing saved quality choices remain in effect. Device
 selection comes from `/api/status`, with X4 as the fallback, like the reader page.
