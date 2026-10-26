@@ -591,7 +591,7 @@ Server-side aggregate across all of the user's devices:
 }
 ```
 
-#### GET /api/v1/stats/overview?tz=&days=&language=&genre=&author=&group_by=
+#### GET /api/v1/stats/overview?tz=&days=&language=&genre=&author=&group_by=&week_start=
 
 A small digest for readers that want to show the account's totals on the device. It has the same numbers
 the Stats page shows, from every source: syncs, chosen start and finish dates, and device stats.
@@ -608,7 +608,8 @@ the Stats page shows, from every source: syncs, chosen start and finish dates, a
   the response stays a few hundred bytes.
 - All the counts cover the whole history, whatever `days` is: `reading_days`, the streaks, the finished counts and the pages.
   The time fields come from device stats: `seconds`, `sessions`, `today_seconds`, and `week_seconds` for the
-  last 7 days including today.
+  last 7 days including today. With `week_start=0` (Sunday) or `week_start=1` (Monday), `week_seconds` covers the
+  calendar week so far instead, in every group too. Any other value is refused.
 
 Filters narrow the digest to matching books: `language` (main subtag, so `en` also matches `en-GB`),
 `genre` (one of the book's genres) and `author` (part of the name). All ignore case and can be combined.
