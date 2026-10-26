@@ -224,3 +224,15 @@ it('edits only the author of a book without a stored title', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
   await waitFor(() => expect(api.setInfo).toHaveBeenCalledWith({}, 'book', { author: 'Tove Jansson' }))
 })
+
+it('credits Hardcover only for a description it supplied', () => {
+  loads['about book'] = { description: 'From the catalog.', manual: false }
+  render(<Book session={{}} book={book} books={[book]} onChange={vi.fn()} />)
+  expect(screen.queryByText('via Hardcover')).toBeTruthy()
+  cleanup()
+  loads['about book'] = { description: 'My own words.', manual: true }
+  render(<Book session={{}} book={book} books={[book]} onChange={vi.fn()} />)
+  expect(screen.getByText('My own words.')).toBeTruthy()
+  expect(screen.queryByText('via Hardcover')).toBeNull()
+  delete loads['about book']
+})
