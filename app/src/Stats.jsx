@@ -922,7 +922,7 @@ export default function Stats({ session, tab = '', summary, activity, books, act
               ['Time read', duration(summary.seconds)],
               ['Pages turned', summary.pages.toLocaleString()],
               ['Sessions', summary.sessions.toLocaleString()],
-              ['Books finished', summary.completed],
+              ['Books finished', books.filter((b) => b.status === 'finished').length],
             ]}
           />
           <ReadingCalendar byDay={timeByDay(summary, activity)} view={daily ? TIME_VIEW : DAYS_VIEW} days={activity?.days} books={books} />

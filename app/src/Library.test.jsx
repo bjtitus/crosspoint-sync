@@ -25,6 +25,12 @@ describe('Library completion updates', () => {
     expect(getByText('day streak').previousElementSibling.textContent).toBe('1')
   })
 
+  it('counts finished books from the library, not a device counter that missed them', () => {
+    const summary = { devices: [{ device: 'KOReader' }], current_streak: 0, seconds: 0, completed: 0 }
+    const { getByText } = render(<Library session={session} books={[finished, reading]} summary={summary} />)
+    expect(getByText('finished').previousElementSibling.textContent).toBe('1')
+  })
+
   it('shows every in-progress book as a reading card and removes completed books', () => {
     const { container, getByRole, getByText, getAllByText, rerender } = render(
       <Library session={session} books={[{ ...finished, status: 'reading' }, reading]} />,

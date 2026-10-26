@@ -90,7 +90,7 @@ export default function Library({ session, books, summary, activity }) {
             ? [
                 [readingStreak(summary, activity), 'day streak'],
                 [duration(summary.seconds).split(' ')[0], 'read'],
-                [summary.completed, 'finished'],
+                [counts.finished, 'finished'],
               ]
             : [
                 [counts.reading, 'reading'],
