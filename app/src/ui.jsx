@@ -243,10 +243,16 @@ export function LogoLoader({ className = 'size-10' }) {
   )
 }
 
+// Shown only after a moment, so a quick load doesn't flash the loader; its space is kept either way.
 export function Spinner() {
+  const [shown, setShown] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setShown(true), 300)
+    return () => clearTimeout(t)
+  }, [])
   return (
     <div className="grid place-items-center py-16">
-      <LogoLoader />
+      <LogoLoader className={`size-10 ${shown ? '' : 'invisible'}`} />
     </div>
   )
 }

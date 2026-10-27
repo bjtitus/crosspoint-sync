@@ -41,8 +41,7 @@ function ReadingCard({ session, book }) {
 
 function Row({ session, book }) {
   return (
-    // content-visibility: rows off screen are not laid out or painted, yet the list keeps its full height.
-    <a href={`#/book/${book.document}`} className="group flex items-center gap-3 py-3 [contain-intrinsic-size:auto_72px] [content-visibility:auto] md:[contain-intrinsic-size:auto_20rem] active:bg-stone-100 md:flex-col md:items-stretch md:gap-2.5 md:py-0 md:active:bg-transparent">
+    <a href={`#/book/${book.document}`} className="group flex items-center gap-3 py-3 active:bg-stone-100 md:flex-col md:items-stretch md:gap-2.5 md:py-0 md:active:bg-transparent">
       <Cover session={session} book={book} small className="w-12 transition md:w-full md:group-hover:-translate-y-0.5 md:group-hover:shadow-md" />
       <div className="min-w-0 flex-1">
         <p className="truncate font-display md:text-sm text-[0.95rem] font-semibold text-stone-900">{book.title || book.filename || 'Untitled book'}</p>
