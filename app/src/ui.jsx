@@ -183,28 +183,43 @@ export function ProgressBar({ value, className = '' }) {
   )
 }
 
+// Whether the element has come near the screen (stays true once it has).
+function useNear() {
+  const ref = useRef(null)
+  const [near, setNear] = useState(typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    if (near || !ref.current) return
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && setNear(true), { rootMargin: '400px' })
+    io.observe(ref.current)
+    return () => io.disconnect()
+  }, [near])
+  return [ref, near]
+}
+
 // Server-resolved cover (cached server-side). Falls back to an e-ink "title page".
 export function Cover({ session, book, small = false, tiny = false, className = '' }) {
   // Follows the book prop: one Cover can be handed another book (the library's
   // first paint is the offline copy) or a corrected cover_url.
   const [looked, setLooked] = useState(null) // { document, url } from a cover lookup
   const [broken, setBroken] = useState(null) // the url that failed to load
+  // A long library would otherwise look up every missing cover at once.
+  const [ref, near] = useNear()
   useEffect(() => {
-    if (book.cover_url || !book.title) return
+    if (book.cover_url || !book.title || !near) return
     let live = true
     api.cover(session, book.document).then((r) => live && setLooked({ document: book.document, url: r.url }), () => {})
     return () => {
       live = false
     }
-  }, [session, book.document, book.cover_url, book.title])
+  }, [session, book.document, book.cover_url, book.title, near])
   const url = book.cover_url || (looked?.document === book.document ? looked.url : null)
 
   const frame = `relative aspect-[2/3] shrink-0 overflow-hidden rounded-md shadow-sm ring-1 ring-stone-950/10 ${className}`
   if (url && url !== broken) {
-    return <img src={url} alt="" loading="lazy" onError={() => setBroken(url)} className={`${frame} object-cover`} />
+    return <img ref={ref} src={url} alt="" loading="lazy" onError={() => setBroken(url)} className={`${frame} object-cover`} />
   }
   return (
-    <div className={`${frame} flex flex-col justify-between bg-cover ${tiny ? 'p-1' : small ? 'p-1 md:p-2.5' : 'p-2.5'}`}>
+    <div ref={ref} className={`${frame} flex flex-col justify-between bg-cover ${tiny ? 'p-1' : small ? 'p-1 md:p-2.5' : 'p-2.5'}`}>
       <div className="paper-grain absolute inset-0 opacity-[0.06]" />
       <p className={`relative line-clamp-5 font-display font-semibold break-words hyphens-auto text-stone-800 ${tiny ? 'text-[0.45rem]/tight' : small ? 'text-[0.45rem]/tight md:text-sm/tight' : 'text-sm/tight'}`}>
         {book.title || book.filename || 'Untitled'}

@@ -5,6 +5,7 @@ import Library from './Library.jsx'
 import { localDay } from './readingHistory.js'
 
 vi.mock('./api.js', () => ({ isApp: false, api: { cover: vi.fn() } }))
+import { api } from './api.js'
 vi.hoisted(() => {
   window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
 })
@@ -79,51 +80,34 @@ describe('duplicate notice', () => {
 })
 
 describe('long lists', () => {
-  // A stand-in IntersectionObserver whose end-of-list marker the test can bring into view.
+  // A stand-in IntersectionObserver the test can bring elements into view with.
   let observers = []
   beforeEach(() => {
     observers = []
+    api.cover.mockReset()
+    api.cover.mockResolvedValue({ url: null })
     vi.stubGlobal('IntersectionObserver', class {
-      constructor(cb) { this.cb = cb; this.on = false; observers.push(this) }
-      observe() { this.on = true }
-      disconnect() { this.on = false }
+      constructor(cb) { this.cb = cb; this.targets = []; observers.push(this) }
+      observe(el) { this.targets.push(el) }
+      disconnect() { this.targets = [] }
     })
   })
   afterEach(() => vi.unstubAllGlobals())
-  const nearEnd = () => act(() => observers.filter((o) => o.on).forEach((o) => o.cb([{ isIntersecting: true }])))
+  const comeNear = (n) => act(() => observers.filter((o) => o.targets.length).slice(0, n).forEach((o) => o.cb([{ isIntersecting: true }])))
 
-  const many = (n, status = 'finished') =>
-    Array.from({ length: n }, (_, i) => ({ document: `${status}${i}`, title: `${status} book ${i}`, status, percentage: 1, cover_url: '/c.jpg', timestamp: n - i }))
-  const rows = (container) => container.querySelectorAll('a[href^="#/book/"]').length
+  const many = (n) => Array.from({ length: n }, (_, i) => ({ document: `d${i}`, title: `Book ${i}`, status: 'finished', percentage: 1, timestamp: n - i }))
 
-  it('draws a long tab in batches as its end nears the screen', () => {
+  it('lists every book at once, so the scrollbar shows the whole tab', () => {
     const { container, getByRole } = render(<Library session={session} books={many(150)} />)
     fireEvent.click(getByRole('button', { name: /Finished 150/ }))
-    expect(rows(container)).toBe(60)
-    nearEnd()
-    expect(rows(container)).toBe(120)
-    nearEnd()
-    expect(rows(container)).toBe(150)
-    expect(observers.filter((o) => o.on)).toHaveLength(0)
+    expect(container.querySelectorAll('a[href^="#/book/"]')).toHaveLength(150)
   })
 
-  it('starts each tab at the first batch again', () => {
-    const books = [...many(100), ...many(100, 'dnf')]
-    const { container, getByRole } = render(<Library session={session} books={books} />)
-    fireEvent.click(getByRole('button', { name: /Finished 100/ }))
-    nearEnd()
-    expect(rows(container)).toBe(100)
-    fireEvent.click(getByRole('button', { name: /Did Not Finish 100/ }))
-    expect(rows(container)).toBe(60)
-  })
-
-  it('keeps adding rows when the list grows after the first paint', () => {
-    const { container, getByRole, rerender } = render(<Library session={session} books={many(10)} />)
-    fireEvent.click(getByRole('button', { name: /Finished 10/ }))
-    expect(rows(container)).toBe(10)
-    rerender(<Library session={session} books={many(130)} />)
-    expect(rows(container)).toBe(60)
-    nearEnd()
-    expect(rows(container)).toBe(120)
+  it('looks up a missing cover only when it comes near the screen', () => {
+    const { getByRole } = render(<Library session={session} books={many(150)} />)
+    fireEvent.click(getByRole('button', { name: /Finished 150/ }))
+    expect(api.cover).not.toHaveBeenCalled()
+    comeNear(12)
+    expect(api.cover).toHaveBeenCalledTimes(12)
   })
 })

@@ -815,7 +815,7 @@ function Timeline({ session, activity, books }) {
                     const b = byDoc.get(entry.document)
                     const ev = dayEvent(entry, acts.get(entry.document), d.day)
                     return (
-                      <a key={entry.document} href={`#/book/${entry.document}`} className="flex items-center gap-3 rounded-xl bg-surface p-3 ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50">
+                      <a key={entry.document} href={`#/book/${entry.document}`} className="flex items-center gap-3 rounded-xl bg-surface p-3 [contain-intrinsic-size:auto_66px] [content-visibility:auto] ring-1 ring-stone-950/5 transition active:scale-[0.99] md:hover:bg-stone-50">
                         <Cover session={session} book={b} tiny className="w-11" />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-stone-900">{b.title || b.filename}</p>
