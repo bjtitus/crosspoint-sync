@@ -208,6 +208,7 @@ export const cached = {
     return r ? bookList(r) : null
   },
   summary: (s) => saved(s, '/api/v1/stats/summary'),
+  clippings: (s) => saved(s, '/api/v1/clippings')?.items ?? null,
   activity: (s) => saved(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}`),
   activityUpdatedAt: (s) => {
     const at = saved(s, `/api/v1/stats/activity?tz=${new Date().getTimezoneOffset()}:saved-at`)
