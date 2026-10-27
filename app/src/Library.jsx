@@ -1,5 +1,5 @@
 import { readingStreak } from './readingHistory.js'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, ChevronRight, Merge } from 'lucide-react'
 import { isApp } from './api.js'
 import { looksLikeSame } from './Book.jsx'
@@ -93,7 +93,8 @@ export default function Library({ session, books, summary, activity }) {
   const shown = sortForTab(books.filter((b) => b.status === tab), tab, activity)
   const [count, end] = useBatches(tab, shown.length)
   // First book that looks like another synced copy of itself.
-  const dupe = books.find((b) => books.some((o) => looksLikeSame(b, o)))
+  // Only when the books change: not again for every batch of rows.
+  const dupe = useMemo(() => books.find((b) => books.some((o) => looksLikeSame(b, o))), [books])
   // Totals count only books the library shows, as Stats does: metadata-less
   // syncs are hidden everywhere, so they mustn't add a "finished" here (#18).
   const listed = new Set(books.map((b) => b.document))
