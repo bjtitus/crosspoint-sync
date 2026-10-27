@@ -238,14 +238,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_7B6DAC3C-E1AE-43B3-A9C0-E64C03854FFE" /* arm64 */ = {
+		"TEMP_52A0CCBE-B6E2-4445-91D4-CA569B8AB604" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = arm64;
 			sourceTree = "<group>";
 		};
-		"TEMP_872BEB3B-867B-4A5A-8065-CDCC67B98F1F" /* x86_64 */ = {
+		"TEMP_D8C77744-9B88-4A54-885A-3E0C23CDE7C7" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);

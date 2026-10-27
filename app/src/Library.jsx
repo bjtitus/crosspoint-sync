@@ -1,4 +1,4 @@
-import { readingStreak } from './readingHistory.js'
+import { hasReadingTime, readingStreak } from './readingHistory.js'
 import { useMemo, useState } from 'react'
 import { BookOpen, ChevronRight, Merge } from 'lucide-react'
 import { isApp } from './api.js'
@@ -85,9 +85,9 @@ export default function Library({ session, books, summary, activity }) {
       <p className="mb-1 inline-block -rotate-1 pr-12 font-hand text-2xl/7 text-brand-600">{greeting()}</p>
       <h1 className="pr-12 font-display text-3xl font-semibold tracking-tight text-stone-900 md:text-4xl">Your library</h1>
 
-      {(summary?.devices?.length > 0 || activity) && (
+      {(hasReadingTime(summary) || activity) && (
         <div className="mt-4 grid grid-cols-3 divide-x divide-stone-200 rounded-xl bg-surface py-3 text-center ring-1 ring-stone-950/5">
-          {(summary?.devices?.length > 0
+          {(hasReadingTime(summary)
             ? [
                 [readingStreak(summary, activity), 'day streak'],
                 [duration(summary.seconds).split(' ')[0], 'read'],

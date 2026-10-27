@@ -253,7 +253,7 @@ describe('reading grids', () => {
   it('updates both streaks from the same dates that fill the grid', () => {
     const summary = {
       devices: [{ device: 'CrossInk' }], current_streak: 8, streak: 12,
-      seconds: 0, pages: 0, sessions: 0, completed: 0,
+      seconds: 3600, pages: 0, sessions: 0, completed: 0,
       tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0],
     }
     const { getByText, rerender, container } = render(<Stats session={{}} books={[]} summary={summary} />)
@@ -335,10 +335,21 @@ describe('reading grids', () => {
     expect(tip('Tue, Aug 18')).toMatch(/: read$/)
   })
 
+  it('a few seconds of device stats show the pages calendar, not a 0m reading-time section', () => {
+    const summary = {
+      devices: [{ device: 'KOReader' }], history_b64: btoa(String.fromCharCode(1)), anchor_day: anchorDay('2026-09-30'),
+      seconds: 7, pages: 2, sessions: 3, completed: 0, current_streak: 1, streak: 1,
+      tod: [0, 0, 7, 0], dow: [0, 0, 7, 0, 0, 0, 0],
+    }
+    const { queryByText } = render(<Stats session={{}} books={[]} summary={summary} activity={{ books: [], days: [], reading_days: [] }} />)
+    expect(queryByText('Reading time')).toBeNull()
+    expect(queryByText('Time read')).toBeNull()
+  })
+
   it('shades device calendar days against the median day and gives unknown time the median shade', () => {
     const summary = {
       devices: [{ device: 'CrossInk' }], history_b64: btoa(String.fromCharCode(15)),
-      anchor_day: anchorDay('2026-09-30'), seconds: 0, pages: 0, sessions: 0, completed: 0,
+      anchor_day: anchorDay('2026-09-30'), seconds: 9600, pages: 0, sessions: 0, completed: 0,
       current_streak: 4, streak: 4, tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0],
       daily: [{ date: '2026-09-30', seconds: 600 }, { date: '2026-09-29', seconds: 1800 }, { date: '2026-09-28', seconds: 7200 }],
     }
@@ -355,7 +366,7 @@ describe('reading grids', () => {
   it('gives the device view the month, 3 month and year scales with time tooltips', () => {
     const summary = {
       devices: [{ device: 'CrossInk' }], history_b64: btoa(String.fromCharCode(3)),
-      anchor_day: anchorDay('2026-09-30'), seconds: 0, pages: 0, sessions: 0, completed: 0,
+      anchor_day: anchorDay('2026-09-30'), seconds: 4200, pages: 0, sessions: 0, completed: 0,
       current_streak: 2, streak: 2, tod: [0, 0, 0, 0], dow: [0, 0, 0, 0, 0, 0, 0],
       daily: [{ date: '2026-09-30', seconds: 4200 }],
     }

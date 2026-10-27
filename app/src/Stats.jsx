@@ -4,7 +4,7 @@ import ShareSheet from './ShareSheet.jsx'
 import { renderCalendarCard, renderStatsCard } from './shareCard.js'
 import { Card, Cover, EmptyState, ProgressBar, ShareIcon, ViaHardcover, duration, pct } from './ui.jsx'
 import { isPace, moodEmoji } from './moods.js'
-import { decodeHistory, localDay, longestReadingStreak, readingStreak, shadeLevels } from './readingHistory.js'
+import { decodeHistory, hasReadingTime, localDay, longestReadingStreak, readingStreak, shadeLevels } from './readingHistory.js'
 
 export { decodeHistory } from './readingHistory.js'
 
@@ -848,7 +848,7 @@ function Timeline({ session, activity, books }) {
 }
 
 export default function Stats({ session, tab = '', summary, activity, books, activityError, activityLoading, activityUpdatedAt, onRetryActivity }) {
-  const hasTime = summary?.devices?.length > 0
+  const hasTime = hasReadingTime(summary)
   // Reveal daily tiles and calendar time labels together after any history, even a zero counter.
   const daily = summary?.daily?.length ? dailyReading(summary.daily) : null
   const [sharing, setSharing] = useState(false)

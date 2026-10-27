@@ -1,4 +1,4 @@
-import { readingStreak } from './readingHistory.js'
+import { hasReadingTime, readingStreak } from './readingHistory.js'
 import { invoke } from '@tauri-apps/api/core'
 import { http, isApp } from './api.js'
 
@@ -45,7 +45,7 @@ export async function updateWidget({ session, books, summary, activity }) {
   const shown = new Set(books.map((b) => b.document))
   const finished = (activity?.books ?? []).filter((b) => shown.has(b.document) && b.finished_at && new Date(b.finished_at * 1000).getFullYear() === year).length
   const pages = (activity?.books ?? []).filter((b) => shown.has(b.document)).reduce((n, b) => n + (b.pages_read ?? 0), 0)
-  const stats = summary?.devices?.length
+  const stats = hasReadingTime(summary)
     ? `${readingStreak(summary, activity)}-day streak · ${Math.round(summary.seconds / 3600)}h read`
     : `${pages.toLocaleString()} pages · ${finished} finished this year`
   const data = current

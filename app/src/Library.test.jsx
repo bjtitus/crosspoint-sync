@@ -18,7 +18,7 @@ afterEach(cleanup)
 
 describe('Library completion updates', () => {
   it('shows the grid-derived streak and uses the device total until dated history loads', () => {
-    const summary = { devices: [{ device: 'CrossInk' }], current_streak: 8, seconds: 0, completed: 0 }
+    const summary = { devices: [{ device: 'CrossInk' }], current_streak: 8, seconds: 3600, completed: 0 }
     const { getByText, rerender } = render(<Library session={session} books={[]} summary={summary} />)
     expect(getByText('day streak').previousElementSibling.textContent).toBe('8')
     const activity = { books: [], reading_days: [localDay(new Date())] }
@@ -26,8 +26,17 @@ describe('Library completion updates', () => {
     expect(getByText('day streak').previousElementSibling.textContent).toBe('1')
   })
 
+  it('a few seconds of device stats keep the pages and finished header, not "0m read"', () => {
+    const summary = { devices: [{ device: 'KOReader' }], current_streak: 1, seconds: 7, completed: 0 }
+    const activity = { books: [{ document: 'finished', pages_read: 120, finished_at: 1 }] }
+    const { getByText, queryByText } = render(<Library session={session} books={[finished, reading]} summary={summary} activity={activity} />)
+    expect(queryByText('read')).toBeNull()
+    expect(getByText('pages read').previousElementSibling.textContent).toBe('120')
+    expect(getByText('finished').previousElementSibling.textContent).toBe('1')
+  })
+
   it('counts finished books from the library, not a device counter that missed them', () => {
-    const summary = { devices: [{ device: 'KOReader' }], current_streak: 0, seconds: 0, completed: 0 }
+    const summary = { devices: [{ device: 'CrossInk' }], current_streak: 0, seconds: 3600, completed: 0 }
     const { getByText } = render(<Library session={session} books={[finished, reading]} summary={summary} />)
     expect(getByText('finished').previousElementSibling.textContent).toBe('1')
   })

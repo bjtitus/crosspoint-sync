@@ -25,6 +25,10 @@ export function decodeHistory(b64, anchorDay = 0, readingDays = []) {
 const hasDatedHistory = (summary, activity) =>
   (summary?.anchor_day > 0 && !!summary.history_b64) || Array.isArray(activity?.reading_days)
 
+// Device stats worth headlining: a reader that only tried stats for a few
+// seconds would otherwise replace pages and finished books with "0m read".
+export const hasReadingTime = (summary) => summary?.devices?.length > 0 && summary.seconds >= 60
+
 // Count the same dates the grid fills, anchored to the user's actual today.
 // An empty dated history is known zero; only missing history uses the old total.
 export function readingStreak(summary, activity) {
