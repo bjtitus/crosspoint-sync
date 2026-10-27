@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import Library from './Library.jsx'
 import { localDay } from './readingHistory.js'
 
 vi.mock('./api.js', () => ({ isApp: false, api: { cover: vi.fn() } }))
+import { api } from './api.js'
 vi.hoisted(() => {
   window.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
 })
@@ -75,5 +76,38 @@ describe('duplicate notice', () => {
     const books = [book('a', '変な家２　～11の間取り図～'), book('b', '変な家2 ~11の間取り図~')]
     const { container } = render(<Library session={session} books={books} />)
     expect(container.textContent).toContain('appears more than once')
+  })
+})
+
+describe('long lists', () => {
+  // A stand-in IntersectionObserver the test can bring elements into view with.
+  let observers = []
+  beforeEach(() => {
+    observers = []
+    api.cover.mockReset()
+    api.cover.mockResolvedValue({ url: null })
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(cb) { this.cb = cb; this.targets = []; observers.push(this) }
+      observe(el) { this.targets.push(el) }
+      disconnect() { this.targets = [] }
+    })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+  const comeNear = (n) => act(() => observers.filter((o) => o.targets.length).slice(0, n).forEach((o) => o.cb([{ isIntersecting: true }])))
+
+  const many = (n) => Array.from({ length: n }, (_, i) => ({ document: `d${i}`, title: `Book ${i}`, status: 'finished', percentage: 1, timestamp: n - i }))
+
+  it('lists every book at once, so the scrollbar shows the whole tab', () => {
+    const { container, getByRole } = render(<Library session={session} books={many(150)} />)
+    fireEvent.click(getByRole('button', { name: /Finished 150/ }))
+    expect(container.querySelectorAll('a[href^="#/book/"]')).toHaveLength(150)
+  })
+
+  it('looks up a missing cover only when it comes near the screen', () => {
+    const { getByRole } = render(<Library session={session} books={many(150)} />)
+    fireEvent.click(getByRole('button', { name: /Finished 150/ }))
+    expect(api.cover).not.toHaveBeenCalled()
+    comeNear(12)
+    expect(api.cover).toHaveBeenCalledTimes(12)
   })
 })

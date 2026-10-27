@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Copy, FileDown, Quote, Search } from 'lucide-react'
-import { api, isApp } from './api.js'
+import { api, cached, isApp } from './api.js'
 import { saveFile } from './shareCard.js'
 import { ClipMenu, ClipShare, DeleteClip, hold } from './Book.jsx'
 import { Cover, EmptyState, ErrorNote, ShareIcon, Spinner, useLoad } from './ui.jsx'
@@ -53,7 +53,7 @@ function Clip({ session, clip, book, onShare, onDelete, showBook }) {
 }
 
 export default function Clippings({ session, books }) {
-  const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`)
+  const [items, error, reload] = useLoad(() => api.allClippings(session, books), [session], `clippings:${session.username}`, () => cached.clippings(session))
   const [query, setQuery] = useState('')
   const [only, setOnly] = useState(null) // document
   const [sharing, setSharing] = useState(null)
