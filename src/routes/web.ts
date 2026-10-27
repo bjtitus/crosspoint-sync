@@ -857,10 +857,21 @@ async function removeBook(btn) {
 }
 
 async function load() {
-  const r = await jget('${basePath}/api/v1/progress?limit=500');
+  const url = '${basePath}/api/v1/progress?limit=500';
+  // A request that fails outright (offline) shows the same error as a failed response.
+  const r = await jget(url).catch(() => ({ ok: false }));
   if (r.status === 409) { location.href = '${basePath}/account'; return; }
   if (!r.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
-  BOOKS = r.data.items || [];
+  const books = r.data.items || [];
+  // Later pages, until the server has no more.
+  for (let next = r.data.next, seen = new Set(); next; ) {
+    const p = seen.has(next) ? { ok: false } : await jget(url + '&cursor=' + encodeURIComponent(next)).catch(() => ({ ok: false }));
+    seen.add(next);
+    if (!p.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
+    books.push(...(p.data.items || []));
+    next = p.data.next;
+  }
+  BOOKS = books;
   render();
 }
 load();

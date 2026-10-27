@@ -26,6 +26,18 @@ export function isValidDocument(v: unknown): v is string {
   return typeof v === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(v);
 }
 
+/**
+ * Keyset cursor for lists ordered newest first: "<updated_at>:<document>" of the last item sent.
+ * undefined when absent, null when malformed.
+ */
+export function parseListCursor(v: string | undefined): { at: number; document: string } | null | undefined {
+  if (v === undefined) return undefined;
+  const m = /^(\d{1,15}):(.+)$/.exec(v);
+  return m && isValidDocument(m[2]) ? { at: Number(m[1]), document: m[2] } : null;
+}
+
+export const listCursor = (row: { updated_at: number; document: string }) => `${row.updated_at}:${row.document}`;
+
 export interface ProgressUpsert {
   userId: number;
   document: string;

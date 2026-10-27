@@ -72,6 +72,16 @@ describe('duplicate notice', () => {
     expect(container.textContent).not.toContain('appears more than once')
   })
 
+  it('finds one duplicate among thousands of books quickly', () => {
+    const books = Array.from({ length: 5000 }, (_, i) => book(`d${i}`, `Some Book ${i}`))
+    // Same title, other author: not a copy. The only real copy is the last book.
+    books.push({ ...book('x', 'Some Book 4998'), author: 'Another Author' }, book('y', 'some book 4999'))
+    const t = performance.now()
+    const { container } = render(<Library session={session} books={books} />)
+    expect(container.textContent).toContain('appears more than once')
+    expect(performance.now() - t).toBeLessThan(3000)
+  })
+
   it('still finds a Japanese title synced twice, full-width forms included', () => {
     const books = [book('a', '変な家２　～11の間取り図～'), book('b', '変な家2 ~11の間取り図~')]
     const { container } = render(<Library session={session} books={books} />)

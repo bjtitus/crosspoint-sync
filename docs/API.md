@@ -254,7 +254,8 @@ per book.
 
 Lists every synced document — newest progress across devices, joined with any stored metadata.
 This is how clients/UIs discover documents without knowing hashes. `?limit=` defaults to 100
-(max 500), ordered newest-first.
+(max 500), ordered newest-first. `next` is `null` on the last page; otherwise pass it back as
+`?cursor=` for the following page. A malformed cursor is rejected with `403`.
 
 ```json
 {
@@ -264,7 +265,8 @@ This is how clients/UIs discover documents without knowing hashes. `?limit=` def
      "filename": "Foundryside - Robert Jackson Bennett.epub",
      "percentage": 0.2853, "progress": "/body/DocFragment[16]/body/div[1]/p[143]",
      "device_id": "crosspoint-reader", "device": "CrossPoint", "timestamp": 1783913361}
-  ]
+  ],
+  "next": "1783913361:25f8abb4f4f5594f02f361726814fea1"
 }
 ```
 
@@ -674,7 +676,8 @@ capture above): omitted fields never overwrite stored values, `language` only fi
 `<service>_id` fields seed exact connector matches. `author` is still accepted for `authors`, and
 `filesize` is this endpoint's own. Use it for books whose metadata a client knows without a
 progress update, e.g. books it only uploads stats for. A merged copy's metadata goes to its book.
-`GET /api/v1/documents` lists them.
+`GET /api/v1/documents` lists them, newest first, 500 per page, with the same `next`/`cursor`
+paging as `GET /api/v1/progress`.
 
 #### PUT /api/v1/documents/{document}/status
 
@@ -820,6 +823,8 @@ The review endpoint (`GET /connectors/{id}/review`) additionally carries `push_n
 per-book condition from the last successful push (e.g. Hardcover has no page count for
 the book, so progress cannot sync), or null. Cleared automatically when the condition
 resolves or the match changes.
+It lists every synced book, newest first, 500 per page, with the same `next`/`cursor` paging as
+`GET /api/v1/progress`.
 
 #### PUT /api/v1/connectors/{id}/matches/{document}
 

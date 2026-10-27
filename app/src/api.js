@@ -69,7 +69,8 @@ function clearOffline() {
   }
 }
 
-async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false } = {}) {
+// store: false keeps the offline fallback but leaves saving to the caller.
+async function call(session, path, init = {}, keepOffline = true, { offlineFallback = true, timestampSaved = false, store = true } = {}) {
   const version = sessionVersion
   const key = `${OFFLINE}${session.username}@${session.server}${path}`
   const isGet = keepOffline && (!init.method || init.method === 'GET')
@@ -100,14 +101,39 @@ async function call(session, path, init = {}, keepOffline = true, { offlineFallb
   const data = await res.json()
   if (isGet && version === sessionVersion) {
     offline.dispatchEvent(new Event('online'))
-    try {
-      localStorage.setItem(key, JSON.stringify(data))
-      if (timestampSaved) localStorage.setItem(`${key}:saved-at`, JSON.stringify(Date.now()))
-    } catch {
-      // storage full: offline copy just stays older
-    }
+    if (store) keep(key, data, timestampSaved)
   }
   return data
+}
+
+function keep(key, data, timestampSaved = false) {
+  try {
+    localStorage.setItem(key, JSON.stringify(data))
+    if (timestampSaved) localStorage.setItem(`${key}:saved-at`, JSON.stringify(Date.now()))
+  } catch {
+    // storage full: offline copy just stays older
+  }
+}
+
+const PROGRESS = '/api/v1/progress?limit=500'
+
+// Every synced book: follows the server's pages, then saves the whole list as the first page's offline copy.
+// A page that fails leaves the previous complete copy in place.
+async function allProgress(session) {
+  const version = sessionVersion
+  const first = await call(session, PROGRESS, {}, true, { store: false })
+  const items = [...first.items]
+  for (let next = first.next, seen = new Set(); next; ) {
+    // A loop would otherwise end early and save a short list as the whole library.
+    if (seen.has(next)) throw new Error('Server repeated a page cursor')
+    seen.add(next)
+    const page = await call(session, `${PROGRESS}&cursor=${encodeURIComponent(next)}`, {}, false)
+    items.push(...page.items)
+    next = page.next
+  }
+  const all = { items, next: null }
+  if (version === sessionVersion) keep(`${OFFLINE}${session.username}@${session.server}${PROGRESS}`, all)
+  return all
 }
 
 // "192.168.1.20:8080" or "sync.example.com" -> candidate base URLs, https first.
@@ -178,7 +204,7 @@ const bookList = (r) =>
 
 export const cached = {
   books: (s) => {
-    const r = saved(s, '/api/v1/progress?limit=500')
+    const r = saved(s, PROGRESS)
     return r ? bookList(r) : null
   },
   summary: (s) => saved(s, '/api/v1/stats/summary'),
@@ -192,9 +218,9 @@ export const cached = {
 
 export const api = {
   // Books a device synced without any metadata can't be shown meaningfully; hide them.
-  books: (s) => call(s, '/api/v1/progress?limit=500').then(bookList),
+  books: (s) => allProgress(s).then(bookList),
   // The hidden ones, so they can be merged into the book they really are.
-  untitledBooks: (s) => call(s, '/api/v1/progress?limit=500').then((r) => r.items.filter((b) => !b.title && !b.filename)),
+  untitledBooks: (s) => allProgress(s).then((r) => r.items.filter((b) => !b.title && !b.filename)),
   summary: (s) => call(s, '/api/v1/stats/summary'),
   // tz: minutes behind UTC, so the server buckets pages into local days.
   // Saved activity paints immediately via cached.activity, but a failed refresh
@@ -221,7 +247,19 @@ export const api = {
   pollLink: (s, id, deviceCode) =>
     call(s, `/api/v1/connectors/${id}/link/poll`, { method: 'POST', body: JSON.stringify({ device_code: deviceCode }) }),
   // Matches review (which book at the service each synced title maps to).
-  review: (s, id) => call(s, `/api/v1/connectors/${id}/review`).then((r) => r.books),
+  async review(s, id) {
+    const url = `/api/v1/connectors/${id}/review`
+    const first = await call(s, url)
+    const books = [...first.books]
+    for (let next = first.next, seen = new Set(); next; ) {
+      if (seen.has(next)) throw new Error('Server repeated a page cursor')
+      seen.add(next)
+      const page = await call(s, `${url}?cursor=${encodeURIComponent(next)}`, {}, false)
+      books.push(...page.books)
+      next = page.next
+    }
+    return books
+  },
   candidates: (s, id) => call(s, `/api/v1/connectors/${id}/candidates`).then((r) => r.books ?? []),
   searchConnector: (s, id, q) => call(s, `/api/v1/connectors/${id}/search?q=${encodeURIComponent(q)}`).then((r) => r.books ?? []),
   bookMatches: (s, doc) => call(s, `/api/v1/documents/${doc}/matches`).then((r) => r.services),

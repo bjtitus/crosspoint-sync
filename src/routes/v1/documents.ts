@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { withTransaction, type DB } from '../../db/db.js';
 import { kosyncError, type AppEnv } from '../../auth/middleware.js';
-import { isValidDocument, languageTag, parseMetadata, saveDocumentMetadata, type DocumentMetadata } from '../kosync.js';
+import { isValidDocument, languageTag, listCursor, parseListCursor, parseMetadata, saveDocumentMetadata, type DocumentMetadata } from '../kosync.js';
 import { nowSeconds } from '../../models/sync.js';
 import { mergeDocuments, resolveDocument, unmergeDocument } from '../../models/merge.js';
 import { coverCandidates, documentInfo } from '../../models/cover.js';
@@ -14,6 +14,7 @@ import { fetchTransport } from '../../connectors/registry.js';
 import { MANUAL_DETAILS, type ManualFlag } from '../../models/manual-details.js';
 
 const MAX_BATCH = 50;
+const DOCUMENTS_PAGE = 500;
 export const STATUSES = ['reading', 'finished', 'dnf', 'paused'] as const;
 
 const DAY = 86400;
@@ -372,14 +373,25 @@ export function documentRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
       series: row.series, series_position: row.series_position, release_year: row.release_year });
   });
 
+  // Newest first, 500 per page; pass `next` back as `cursor` for the following page.
   app.get('/documents', (c) => {
     const user = c.get('user');
+    const cursor = parseListCursor(c.req.query('cursor'));
+    if (cursor === null) return kosyncError(c, 403, 2003, 'Invalid request');
     const rows = db
       .prepare(
-        'SELECT document, title, author, filename, filesize, language, status, status_at, pause_reason, cover_url, page_count, updated_at FROM documents WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500'
+        `SELECT document, title, author, filename, filesize, language, status, status_at, pause_reason, cover_url, page_count, updated_at
+         FROM documents WHERE user_id = ?
+           AND (? IS NULL OR updated_at < ? OR (updated_at = ? AND document < ?))
+         ORDER BY updated_at DESC, document DESC LIMIT ?`
       )
-      .all(user.id);
-    return c.json({ items: rows });
+      .all(user.id, cursor?.at ?? null, cursor?.at ?? null, cursor?.at ?? null, cursor?.document ?? null, DOCUMENTS_PAGE + 1) as {
+      document: string;
+      updated_at: number;
+    }[];
+    const more = rows.length > DOCUMENTS_PAGE;
+    if (more) rows.pop();
+    return c.json({ items: rows, next: more ? listCursor(rows[rows.length - 1]) : null });
   });
 
   return app;

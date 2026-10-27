@@ -30,7 +30,7 @@ import {
   upsertAccount,
   type OptionValues,
 } from '../../connectors/store.js';
-import { isValidDocument } from '../kosync.js';
+import { isValidDocument, listCursor, parseListCursor } from '../kosync.js';
 import { ConnectorOperationError, type HttpTransport } from '../../connectors/types.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
 import { resolveDocument } from '../../models/merge.js';
@@ -53,6 +53,7 @@ interface PendingOAuth {
 // ponytail: in memory, so one server instance; a restart mid-sign-in means signing in again.
 const pendingOAuth = new Map<string, PendingOAuth>();
 const OAUTH_TTL_MS = 10 * 60_000;
+const REVIEW_PAGE = 500;
 const b64url = (b: Buffer) => b.toString('base64url');
 
 function publicOrigin(c: Context<AppEnv>, trustProxy: boolean): string {
@@ -740,25 +741,36 @@ export function connectorRoutes(
   });
 
   // Review list: every synced book with its title and this connector's match state.
+  // Newest first, 500 per page; pass `next` back as `cursor` for the following page.
   app.get('/connectors/:id/review', (c) => {
     const conn = getConnector(c.req.param('id'));
     if (!conn) return c.json({ code: 2003, message: 'Unknown connector' }, 404);
+    const cursor = parseListCursor(c.req.query('cursor'));
+    if (cursor === null) return kosyncError(c, 403, 2003, 'Invalid request');
     const user = c.get('user');
     const rows = db
       .prepare(
         `SELECT p.document AS document, d.title AS title, d.author AS author,
                 m.external_id AS external_id, m.source AS source, m.confidence AS confidence,
-                m.push_note AS push_note
+                m.push_note AS push_note, p.updated_at AS updated_at
          FROM progress p
          LEFT JOIN documents d ON d.user_id = p.user_id AND d.document = p.document
          LEFT JOIN connector_matches m ON m.user_id = p.user_id AND m.connector_id = ? AND m.document = p.document
          WHERE p.user_id = ?
-         GROUP BY p.document
-         ORDER BY MAX(p.updated_at) DESC
-         LIMIT 500`
+           AND p.updated_at = (
+             SELECT MAX(p2.updated_at) FROM progress p2 WHERE p2.user_id = p.user_id AND p2.document = p.document
+           )
+           AND p.device_id = (
+             SELECT MIN(p3.device_id) FROM progress p3
+             WHERE p3.user_id = p.user_id AND p3.document = p.document AND p3.updated_at = p.updated_at
+           )
+           AND (? IS NULL OR p.updated_at < ? OR (p.updated_at = ? AND p.document < ?))
+         ORDER BY p.updated_at DESC, p.document DESC
+         LIMIT ?`
       )
-      .all(conn.id, user.id) as unknown as {
+      .all(conn.id, user.id, cursor?.at ?? null, cursor?.at ?? null, cursor?.at ?? null, cursor?.document ?? null, REVIEW_PAGE + 1) as unknown as {
       document: string;
+      updated_at: number;
       title: string | null;
       author: string | null;
       external_id: string | null;
@@ -766,8 +778,11 @@ export function connectorRoutes(
       confidence: number | null;
       push_note: string | null;
     }[];
+    const more = rows.length > REVIEW_PAGE;
+    if (more) rows.pop();
     return c.json({
       connector: conn.id,
+      next: more ? listCursor(rows[rows.length - 1]) : null,
       books: rows.map((r) => ({
         document: r.document,
         title: r.title,
