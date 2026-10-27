@@ -258,6 +258,17 @@ const norm = (s) => (s ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p
 export const looksLikeSame = (a, b) =>
   a.document !== b.document && norm(a.title) && norm(a.title) === norm(b.title) && (!a.author || !b.author || norm(a.author) === norm(b.author))
 
+// First book that looks like another copy of itself. Only books with the same title are compared,
+// so a large library stays fast.
+export function firstDuplicate(books) {
+  const byTitle = new Map()
+  for (const b of books) {
+    const t = norm(b.title)
+    if (t) byTitle.has(t) ? byTitle.get(t).push(b) : byTitle.set(t, [b])
+  }
+  return books.find((b) => (byTitle.get(norm(b.title)) ?? []).some((o) => looksLikeSame(b, o)))
+}
+
 const field =
   'h-11 w-full rounded-xl bg-surface px-3 text-base text-stone-900 ring-1 ring-stone-950/10 outline-none placeholder:text-stone-400 focus:ring-2 focus:ring-brand-500/60'
 

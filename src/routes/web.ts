@@ -857,10 +857,20 @@ async function removeBook(btn) {
 }
 
 async function load() {
-  const r = await jget('${basePath}/api/v1/progress?limit=500');
+  const url = '${basePath}/api/v1/progress?limit=500';
+  const r = await jget(url);
   if (r.status === 409) { location.href = '${basePath}/account'; return; }
   if (!r.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
-  BOOKS = r.data.items || [];
+  const books = r.data.items || [];
+  // Later pages, until the server has no more.
+  for (let next = r.data.next, seen = new Set(); next && !seen.has(next); ) {
+    seen.add(next);
+    const p = await jget(url + '&cursor=' + encodeURIComponent(next));
+    if (!p.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
+    books.push(...(p.data.items || []));
+    next = p.data.next;
+  }
+  BOOKS = books;
   render();
 }
 load();

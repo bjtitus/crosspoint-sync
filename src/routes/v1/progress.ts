@@ -5,6 +5,8 @@ import { kosyncError, type AppEnv } from '../../auth/middleware.js';
 import {
   fanOutDeviceProgress,
   isValidDocument,
+  listCursor,
+  parseListCursor,
   parseProgressBody,
   upsertProgress,
   writeDeviceProgress,
@@ -80,10 +82,16 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
 
   // List every synced document with its newest progress (joined with any known
   // metadata) - lets clients and UIs discover documents without knowing hashes.
+  // Newest first; pass `next` back as `cursor` for the following page.
   app.get('/progress', (c) => {
     const user = c.get('user');
-    enrichSoon(db, user.id); // Hardcover details for new books, in the background
-    autoPause(db, { userId: user.id });
+    const cursor = parseListCursor(c.req.query('cursor'));
+    if (cursor === null) return kosyncError(c, 403, 2003, 'Invalid request');
+    if (!cursor) {
+      // Once per listing, not per page.
+      enrichSoon(db, user.id); // Hardcover details for new books, in the background
+      autoPause(db, { userId: user.id });
+    }
     const limitRaw = Number(c.req.query('limit') ?? 100);
     const limit =
       Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 500) : 100;
@@ -107,10 +115,11 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
              WHERE p3.user_id = p.user_id AND p3.document = p.document
                AND p3.updated_at = p.updated_at
            )
-         ORDER BY p.updated_at DESC
+           AND (? IS NULL OR p.updated_at < ? OR (p.updated_at = ? AND p.document < ?))
+         ORDER BY p.updated_at DESC, p.document DESC
          LIMIT ?`
       )
-      .all(user.id, limit) as unknown as {
+      .all(user.id, cursor?.at ?? null, cursor?.at ?? null, cursor?.at ?? null, cursor?.document ?? null, limit + 1) as unknown as {
       document: string;
       device_id: string;
       device: string;
@@ -143,8 +152,11 @@ export function progressRoutes(db: DB, refreshProgress: ProgressRefresh = async 
         return [];
       }
     };
+    const more = rows.length > limit;
+    if (more) rows.pop();
     const aliases = aliasesByDocument(db, user.id);
     return c.json({
+      next: more ? listCursor(rows[rows.length - 1]) : null,
       items: rows.map((r) => {
         let position: { page?: number; pages?: number } | null = null;
         if (r.position) {

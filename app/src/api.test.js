@@ -131,3 +131,87 @@ describe('account data isolation', () => {
     expect(cached.books(session('uxj3'))).toBeNull()
   })
 })
+
+describe('book list paging', () => {
+  const book = (n) => ({ document: `d${n}`, title: `Book ${n}` })
+  const page = (ns, next) => response({ items: ns.map(book), next })
+  const titles = (r) => r.map((b) => b.title)
+
+  it('follows every page and saves the whole list for offline use', async () => {
+    const s = session('pager')
+    fetchMock.mockResolvedValueOnce(page([1, 2], '100:d2')).mockResolvedValueOnce(page([3], '99:d3')).mockResolvedValueOnce(page([4], null))
+    expect(titles(await api.books(s))).toEqual(['Book 1', 'Book 2', 'Book 3', 'Book 4'])
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `https://sync.test${progress}`,
+      `https://sync.test${progress}&cursor=100%3Ad2`,
+      `https://sync.test${progress}&cursor=99%3Ad3`,
+    ])
+    expect(titles(cached.books(s))).toEqual(['Book 1', 'Book 2', 'Book 3', 'Book 4'])
+    // Later pages are not saved under their own keys (cursors change with every sync).
+    expect(Object.keys(localStorage).filter((k) => k.includes('cursor'))).toEqual([])
+  })
+
+  it('makes one request when everything fits on the first page', async () => {
+    fetchMock.mockResolvedValueOnce(page([1], null))
+    expect(titles(await api.books(session('pager')))).toEqual(['Book 1'])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the full saved list when a later page fails', async () => {
+    const s = session('pager')
+    fetchMock.mockResolvedValueOnce(page([1, 2], '1:d2')).mockResolvedValueOnce(page([3], null))
+    await api.books(s)
+    fetchMock.mockResolvedValueOnce(page([5, 1], '1:d1')).mockRejectedValueOnce(new Error('dropped'))
+    await expect(api.books(s)).rejects.toThrow('dropped')
+    expect(titles(cached.books(s))).toEqual(['Book 1', 'Book 2', 'Book 3'])
+  })
+
+  it('keeps the full saved list when two loads overlap and one fails', async () => {
+    const s = session('pager')
+    fetchMock.mockResolvedValueOnce(page([1, 2], '1:d2')).mockResolvedValueOnce(page([3], null))
+    await api.books(s)
+    fetchMock.mockResolvedValueOnce(page([1, 2], '1:d2')).mockResolvedValueOnce(page([1, 2], '1:d2'))
+      .mockRejectedValueOnce(new Error('dropped')).mockResolvedValueOnce(page([3], null))
+    const [a, b] = await Promise.allSettled([api.books(s), api.untitledBooks(s)])
+    expect([a.status, b.status].sort()).toEqual(['fulfilled', 'rejected'])
+    expect(titles(cached.books(s))).toEqual(['Book 1', 'Book 2', 'Book 3'])
+  })
+
+  it('shows the whole saved list when offline', async () => {
+    const s = session('pager')
+    fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockResolvedValueOnce(page([2], null))
+    await api.books(s)
+    fetchMock.mockReset()
+    fetchMock.mockRejectedValue(new Error('offline'))
+    expect(titles(await api.books(s))).toEqual(['Book 1', 'Book 2'])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops when the server repeats a cursor', async () => {
+    fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockResolvedValue(page([2], '1:d1'))
+    expect(titles(await api.books(session('pager')))).toEqual(['Book 1', 'Book 2'])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not save the list for an account that signed out meanwhile', async () => {
+    const s = session('pager')
+    fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockImplementationOnce(async () => {
+      logout()
+      return page([2], null)
+    })
+    await api.books(s)
+    expect(cached.books(s)).toBeNull()
+  })
+
+  it('finds untitled books on later pages', async () => {
+    fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockResolvedValueOnce(response({ items: [{ document: 'u1', title: null, filename: null }], next: null }))
+    expect((await api.untitledBooks(session('pager'))).map((b) => b.document)).toEqual(['u1'])
+  })
+})
+
+it('loads every page of a connector review list', async () => {
+  fetchMock.mockResolvedValueOnce(response({ books: [{ document: 'a' }], next: '1:a' }))
+    .mockResolvedValueOnce(response({ books: [{ document: 'b' }], next: null }))
+  expect((await api.review(session('pager'), 'hardcover')).map((b) => b.document)).toEqual(['a', 'b'])
+  expect(fetchMock.mock.calls[1][0]).toBe('https://sync.test/api/v1/connectors/hardcover/review?cursor=1%3Aa')
+})
