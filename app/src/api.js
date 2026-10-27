@@ -123,7 +123,9 @@ async function allProgress(session) {
   const version = sessionVersion
   const first = await call(session, PROGRESS, {}, true, { store: false })
   const items = [...first.items]
-  for (let next = first.next, seen = new Set(); next && !seen.has(next); ) {
+  for (let next = first.next, seen = new Set(); next; ) {
+    // A loop would otherwise end early and save a short list as the whole library.
+    if (seen.has(next)) throw new Error('Server repeated a page cursor')
     seen.add(next)
     const page = await call(session, `${PROGRESS}&cursor=${encodeURIComponent(next)}`, {}, false)
     items.push(...page.items)
@@ -248,7 +250,8 @@ export const api = {
     const url = `/api/v1/connectors/${id}/review`
     const first = await call(s, url)
     const books = [...first.books]
-    for (let next = first.next, seen = new Set(); next && !seen.has(next); ) {
+    for (let next = first.next, seen = new Set(); next; ) {
+      if (seen.has(next)) throw new Error('Server repeated a page cursor')
       seen.add(next)
       const page = await call(s, `${url}?cursor=${encodeURIComponent(next)}`, {}, false)
       books.push(...page.books)

@@ -187,10 +187,19 @@ describe('book list paging', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('stops when the server repeats a cursor', async () => {
+  it('fails without saving a short list when the server repeats a cursor', async () => {
+    const s = session('pager')
+    fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockResolvedValueOnce(page([2], '2:d2')).mockResolvedValueOnce(page([3], null))
+    await api.books(s)
     fetchMock.mockResolvedValueOnce(page([1], '1:d1')).mockResolvedValue(page([2], '1:d1'))
-    expect(titles(await api.books(session('pager')))).toEqual(['Book 1', 'Book 2'])
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await expect(api.books(s)).rejects.toThrow('repeated')
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(titles(cached.books(s))).toEqual(['Book 1', 'Book 2', 'Book 3'])
+  })
+
+  it('fails when a review list repeats a cursor', async () => {
+    fetchMock.mockResolvedValueOnce(response({ books: [{ document: 'a' }], next: '1:a' })).mockResolvedValue(response({ books: [{ document: 'b' }], next: '1:a' }))
+    await expect(api.review(session('pager'), 'hardcover')).rejects.toThrow('repeated')
   })
 
   it('does not save the list for an account that signed out meanwhile', async () => {

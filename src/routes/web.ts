@@ -863,9 +863,9 @@ async function load() {
   if (!r.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
   const books = r.data.items || [];
   // Later pages, until the server has no more.
-  for (let next = r.data.next, seen = new Set(); next && !seen.has(next); ) {
+  for (let next = r.data.next, seen = new Set(); next; ) {
+    const p = seen.has(next) ? { ok: false } : await jget(url + '&cursor=' + encodeURIComponent(next));
     seen.add(next);
-    const p = await jget(url + '&cursor=' + encodeURIComponent(next));
     if (!p.ok) { $('list').innerHTML = '<p class="muted">Could not load synced books.</p>'; return; }
     books.push(...(p.data.items || []));
     next = p.data.next;

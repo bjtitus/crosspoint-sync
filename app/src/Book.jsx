@@ -258,15 +258,24 @@ const norm = (s) => (s ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p
 export const looksLikeSame = (a, b) =>
   a.document !== b.document && norm(a.title) && norm(a.title) === norm(b.title) && (!a.author || !b.author || norm(a.author) === norm(b.author))
 
-// First book that looks like another copy of itself. Only books with the same title are compared,
-// so a large library stays fast.
+// First book that looks like another copy of itself, in one pass: per title, how many books
+// have each author and how many have none (looksLikeSame's rules, without comparing every pair).
 export function firstDuplicate(books) {
   const byTitle = new Map()
   for (const b of books) {
     const t = norm(b.title)
-    if (t) byTitle.has(t) ? byTitle.get(t).push(b) : byTitle.set(t, [b])
+    if (!t) continue
+    if (!byTitle.has(t)) byTitle.set(t, { size: 0, noAuthor: 0, authors: new Map() })
+    const g = byTitle.get(t)
+    g.size++
+    if (!b.author) g.noAuthor++
+    else g.authors.set(norm(b.author), (g.authors.get(norm(b.author)) ?? 0) + 1)
   }
-  return books.find((b) => (byTitle.get(norm(b.title)) ?? []).some((o) => looksLikeSame(b, o)))
+  return books.find((b) => {
+    const g = byTitle.get(norm(b.title))
+    if (!g || g.size < 2) return false
+    return !b.author || g.noAuthor > 0 || g.authors.get(norm(b.author)) > 1
+  })
 }
 
 const field =
