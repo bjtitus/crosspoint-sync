@@ -1,5 +1,5 @@
 import { readingStreak } from './readingHistory.js'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BookOpen, ChevronRight, Merge } from 'lucide-react'
 import { isApp } from './api.js'
 import { looksLikeSame } from './Book.jsx'
@@ -68,10 +68,30 @@ function sortForTab(list, tab, activity) {
   return [...list].sort((a, b) => key(b) - key(a))
 }
 
+// Rows drawn at a time. More follow as the list's end nears the screen, so a large library
+// doesn't draw (and look up covers for) every book at once.
+const BATCH = 60
+
+function useBatches(key, total) {
+  const [state, setState] = useState({ key, count: BATCH })
+  const count = state.key === key ? state.count : BATCH
+  const end = useRef(null)
+  const more = count < total
+  useEffect(() => {
+    if (!end.current || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver(([e]) => e.isIntersecting && setState({ key, count: count + BATCH }), { rootMargin: '800px' })
+    io.observe(end.current)
+    return () => io.disconnect()
+  }, [key, count, more])
+  // Without IntersectionObserver nothing would ever add rows, so draw them all.
+  return [typeof IntersectionObserver === 'undefined' ? Infinity : count, end]
+}
+
 export default function Library({ session, books, summary, activity }) {
   const [tab, setTab] = useState('reading')
   const counts = Object.fromEntries(STATUS.map((s) => [s.id, books.filter((b) => b.status === s.id).length]))
   const shown = sortForTab(books.filter((b) => b.status === tab), tab, activity)
+  const [count, end] = useBatches(tab, shown.length)
   // First book that looks like another synced copy of itself.
   const dupe = books.find((b) => books.some((o) => looksLikeSame(b, o)))
   // Totals count only books the library shows, as Stats does: metadata-less
@@ -136,11 +156,12 @@ export default function Library({ session, books, summary, activity }) {
       <div className="mt-4">
         {tab !== 'reading' && shown.length > 0 && (
           <div className="divide-y divide-stone-200 md:mt-8 md:grid md:grid-cols-4 md:gap-x-6 md:gap-y-8 md:divide-y-0 lg:grid-cols-5 xl:grid-cols-6">
-            {shown.map((b) => (
+            {shown.slice(0, count).map((b) => (
               <Row key={b.document} session={session} book={b} />
             ))}
           </div>
         )}
+        {tab !== 'reading' && count < shown.length && <div ref={end} className="h-px" />}
         {shown.length === 0 && <LibraryEmpty tab={tab} hasBooks={books.length > 0} />}
       </div>
 

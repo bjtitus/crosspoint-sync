@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import Library from './Library.jsx'
 import { localDay } from './readingHistory.js'
 
@@ -75,5 +75,55 @@ describe('duplicate notice', () => {
     const books = [book('a', '変な家２　～11の間取り図～'), book('b', '変な家2 ~11の間取り図~')]
     const { container } = render(<Library session={session} books={books} />)
     expect(container.textContent).toContain('appears more than once')
+  })
+})
+
+describe('long lists', () => {
+  // A stand-in IntersectionObserver whose end-of-list marker the test can bring into view.
+  let observers = []
+  beforeEach(() => {
+    observers = []
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(cb) { this.cb = cb; this.on = false; observers.push(this) }
+      observe() { this.on = true }
+      disconnect() { this.on = false }
+    })
+  })
+  afterEach(() => vi.unstubAllGlobals())
+  const nearEnd = () => act(() => observers.filter((o) => o.on).forEach((o) => o.cb([{ isIntersecting: true }])))
+
+  const many = (n, status = 'finished') =>
+    Array.from({ length: n }, (_, i) => ({ document: `${status}${i}`, title: `${status} book ${i}`, status, percentage: 1, cover_url: '/c.jpg', timestamp: n - i }))
+  const rows = (container) => container.querySelectorAll('a[href^="#/book/"]').length
+
+  it('draws a long tab in batches as its end nears the screen', () => {
+    const { container, getByRole } = render(<Library session={session} books={many(150)} />)
+    fireEvent.click(getByRole('button', { name: /Finished 150/ }))
+    expect(rows(container)).toBe(60)
+    nearEnd()
+    expect(rows(container)).toBe(120)
+    nearEnd()
+    expect(rows(container)).toBe(150)
+    expect(observers.filter((o) => o.on)).toHaveLength(0)
+  })
+
+  it('starts each tab at the first batch again', () => {
+    const books = [...many(100), ...many(100, 'dnf')]
+    const { container, getByRole } = render(<Library session={session} books={books} />)
+    fireEvent.click(getByRole('button', { name: /Finished 100/ }))
+    nearEnd()
+    expect(rows(container)).toBe(100)
+    fireEvent.click(getByRole('button', { name: /Did Not Finish 100/ }))
+    expect(rows(container)).toBe(60)
+  })
+
+  it('keeps adding rows when the list grows after the first paint', () => {
+    const { container, getByRole, rerender } = render(<Library session={session} books={many(10)} />)
+    fireEvent.click(getByRole('button', { name: /Finished 10/ }))
+    expect(rows(container)).toBe(10)
+    rerender(<Library session={session} books={many(130)} />)
+    expect(rows(container)).toBe(60)
+    nearEnd()
+    expect(rows(container)).toBe(120)
   })
 })
