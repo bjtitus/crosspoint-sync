@@ -423,6 +423,21 @@ export function latestProgress(db: DB, userId: number, document: string): {
   ).get(userId, document) as { percentage: number; progress: string; updated_at: number } | undefined ?? null;
 }
 
+const CROSSPOINT_DEVICE_ID = /^(crosspoint|crossink)-/;
+
+/**
+ * Whether a device other than CrossPoint firmware has synced this book. Such a
+ * reader (stock KOReader) resolves a place as a path into the file and cannot
+ * open a bare percentage, so a percentage-only update must not reach it.
+ */
+export function hasPathOnlyReader(db: DB, userId: number, document: string): boolean {
+  const rows = db.prepare(
+    `SELECT device_id FROM progress WHERE user_id = ? AND document = ?
+     AND device_id NOT IN (SELECT connector_id FROM connector_accounts WHERE user_id = ?)`
+  ).all(userId, document, userId) as { device_id: string }[];
+  return rows.some((row) => !CROSSPOINT_DEVICE_ID.test(row.device_id));
+}
+
 export function latestPercentage(db: DB, userId: number, document: string): number | null {
   return latestProgress(db, userId, document)?.percentage ?? null;
 }

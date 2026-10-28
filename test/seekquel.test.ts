@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOC, makeTestApp, registerUser } from './helpers.js';
 import { resetEncryptionKeyCache } from '../src/crypto/secrets.js';
 import type { HttpTransport, OutboundEvent } from '../src/connectors/types.js';
@@ -34,7 +34,7 @@ const body = (call: { body?: string }) => JSON.parse(call.body ?? '{}');
 
 const KEY = { TOKEN_ENC_KEY: 'a'.repeat(64) };
 beforeEach(() => { Object.assign(process.env, KEY); resetEncryptionKeyCache(); });
-afterEach(() => { delete process.env.TOKEN_ENC_KEY; delete process.env.SEEKQUEL_URL; resetEncryptionKeyCache(); });
+afterEach(() => { vi.useRealTimers(); delete process.env.TOKEN_ENC_KEY; delete process.env.SEEKQUEL_URL; resetEncryptionKeyCache(); });
 
 describe('seekquel connector (unit)', () => {
   it('points at Seekquel unless SEEKQUEL_URL says otherwise', () => {
@@ -173,6 +173,37 @@ describe('seekquel connector (unit)', () => {
     expect(finished).toMatchObject({ ok: false, retryable: true, error: expect.stringContaining('Seekquel') });
   });
 
+  it('turns a place Seekquel has read further than the device into a forward-only percentage', async () => {
+    const fake = fakeTransport();
+    fake.on(`/syncs/progress/${DOC}`, 200, {
+      document: DOC, progress: 'seekquel-linked-copy', percentage: 0.5, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_000,
+    });
+    const change = await seekquelConnector.pullProgress!(CRED, MATCH, fake.transport, 0);
+    expect(change).toEqual({
+      externalId: DOC, percentage: 0.5, finished: false, updatedAtMs: 1_760_000_000_000, furthestReadOnly: true,
+    });
+    expect(fake.calls[0]).toMatchObject({ method: 'GET', url: `${SERVER}/syncs/progress/${DOC}` });
+    expect(fake.calls[0].headers?.['x-auth-user']).toBe(CRED.key);
+  });
+
+  it('ignores our own push read back, a missing book and an unusable answer', async () => {
+    const fake = fakeTransport();
+    fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: '/body/p[2]', percentage: 0.42, device: 'CrossPoint Sync', device_id: 'crosspoint-sync' });
+    expect(await seekquelConnector.pullProgress!(CRED, MATCH, fake.transport, 0)).toBeNull();
+    fake.on(`/syncs/progress/${DOC}`, 404, {});
+    expect(await seekquelConnector.pullProgress!(CRED, MATCH, fake.transport, 0)).toBeNull();
+    fake.on(`/syncs/progress/${DOC}`, 200, { progress: 'seekquel-linked-copy', percentage: 'half' });
+    expect(await seekquelConnector.pullProgress!(CRED, MATCH, fake.transport, 0)).toBeNull();
+  });
+
+  it('asks to link again on 401 and retries a rate limit or server error when pulling', async () => {
+    const fake = fakeTransport();
+    fake.on(`/syncs/progress/${DOC}`, 401, {});
+    await expect(seekquelConnector.pullProgress!(CRED, MATCH, fake.transport, 0)).rejects.toMatchObject({ needsReauth: true });
+    fake.on(`/syncs/progress/${DOC}`, 503, {});
+    await expect(seekquelConnector.pullProgress!(CRED, MATCH, fake.transport, 0)).rejects.toMatchObject({ retryable: true, needsReauth: false });
+  });
+
   it('asks to link again on 401, gives up on 403 without asking, and retries on 429 and server errors', async () => {
     const fake = fakeTransport();
     fake.on('/syncs/progress', 401, {});
@@ -264,7 +295,49 @@ describe('seekquel connector (end to end)', () => {
     expect(statusCalls()).toBe(2);
   });
 
-  it('does not store a link whose key Seekquel refuses', async () => {
+  it('hands the device the place Seekquel has read to, and never moves it backwards', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers, linked } = await linkSeekquel(fake);
+    expect(linked).toBe(true);
+    await app.request('/syncs/progress', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device_id: 'crosspoint-reader', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+    });
+    await drainQueue(db, fake.transport, 10);
+
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
+    const read = async () => (await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()) as { percentage: number };
+
+    fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: 'seekquel-linked-copy', percentage: 0.5, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_000 });
+    expect((await read()).percentage).toBe(0.5);
+
+    fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: 'seekquel-linked-copy', percentage: 0.3, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_100 });
+    expect((await read()).percentage).toBe(0.5);
+  });
+
+  
+
+  it('never hands a bare percentage to a book a stock KOReader has synced', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers, linked } = await linkSeekquel(fake);
+    expect(linked).toBe(true);
+    const put = (device_id: string, percentage: number) => app.request('/syncs/progress', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage, device_id, metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+    });
+    await put('crosspoint-reader', 0.2);
+    await put('kindle-paperwhite-uuid', 0.2);
+    await drainQueue(db, fake.transport, 10);
+
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
+    fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: 'seekquel-linked-copy', percentage: 0.5, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_000 });
+    const got = (await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()) as { percentage: number };
+    expect(got.percentage).toBe(0.2);
+  });
+
+it('does not store a link whose key Seekquel refuses', async () => {
     const fake = fakeTransport();
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);
