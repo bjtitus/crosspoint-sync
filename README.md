@@ -27,8 +27,13 @@ The full wire contract is in [docs/API.md](docs/API.md).
 docker run -d --name crosspoint-sync \
   -p 8080:8080 \
   -v crosspoint-data:/data \
+  -e TOKEN_ENC_KEY=<output of openssl rand -hex 32> \
   ghcr.io/crosspoint-reader/crosspoint-sync:main
 ```
+
+`TOKEN_ENC_KEY` is optional. Without it, sync works but linking services (Hardcover,
+Micro.blog, etc.) is disabled. Generate it once with `openssl rand -hex 32` and keep it:
+changing it later makes saved service logins unreadable, and they must be linked again.
 
 Or from a checkout: `docker compose up -d` uses the published image from
 `docker-compose.yml`.
