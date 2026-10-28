@@ -302,7 +302,7 @@ describe('seekquel connector (end to end)', () => {
     await app.request('/syncs/progress', {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device_id: 'crosspoint-reader', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device: 'CrossPoint', device_id: 'A1B2C3D4', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
     });
     await drainQueue(db, fake.transport, 10);
 
@@ -316,19 +316,33 @@ describe('seekquel connector (end to end)', () => {
     expect((await read()).percentage).toBe(0.5);
   });
 
-  
+  it('hands a CrossInk reader the place too', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    await app.request('/syncs/progress', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device: 'CrossInk', device_id: 'crossink-9F8E7D6C', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+    });
+    await drainQueue(db, fake.transport, 10);
+
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
+    fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: 'seekquel-linked-copy', percentage: 0.5, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_000 });
+    const got = (await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()) as { percentage: number };
+    expect(got.percentage).toBe(0.5);
+  });
 
   it('never hands a bare percentage to a book a stock KOReader has synced', async () => {
     const fake = fakeTransport();
     const { app, db, headers, linked } = await linkSeekquel(fake);
     expect(linked).toBe(true);
-    const put = (device_id: string, percentage: number) => app.request('/syncs/progress', {
+    const put = (device: string, device_id: string, percentage: number) => app.request('/syncs/progress', {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage, device_id, metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage, device, device_id, metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
     });
-    await put('crosspoint-reader', 0.2);
-    await put('kindle-paperwhite-uuid', 0.2);
+    await put('CrossPoint', 'A1B2C3D4', 0.2);
+    await put('Kindle', 'kindle-paperwhite-uuid', 0.2);
     await drainQueue(db, fake.transport, 10);
 
     vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
@@ -337,7 +351,7 @@ describe('seekquel connector (end to end)', () => {
     expect(got.percentage).toBe(0.2);
   });
 
-it('does not store a link whose key Seekquel refuses', async () => {
+  it('does not store a link whose key Seekquel refuses', async () => {
     const fake = fakeTransport();
     const { app } = makeTestApp({}, { connectorTransport: fake.transport });
     const { headers } = await registerUser(app);

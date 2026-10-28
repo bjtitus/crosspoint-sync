@@ -423,19 +423,21 @@ export function latestProgress(db: DB, userId: number, document: string): {
   ).get(userId, document) as { percentage: number; progress: string; updated_at: number } | undefined ?? null;
 }
 
-const CROSSPOINT_DEVICE_ID = /^(crosspoint|crossink)-/;
+const CROSSPOINT_FAMILY = /^cross(point|ink)\b/i;
 
 /**
  * Whether a device other than CrossPoint firmware has synced this book. Such a
  * reader (stock KOReader) resolves a place as a path into the file and cannot
- * open a bare percentage, so a percentage-only update must not reach it.
+ * open a bare percentage, so a percentage-only update must not reach it. The
+ * firmware names itself in `device` ("CrossPoint", "CrossInk"); its `device_id`
+ * is a per-reader id and says nothing about the firmware.
  */
 export function hasPathOnlyReader(db: DB, userId: number, document: string): boolean {
   const rows = db.prepare(
-    `SELECT device_id FROM progress WHERE user_id = ? AND document = ?
+    `SELECT device_id, device FROM progress WHERE user_id = ? AND document = ?
      AND device_id NOT IN (SELECT connector_id FROM connector_accounts WHERE user_id = ?)`
-  ).all(userId, document, userId) as { device_id: string }[];
-  return rows.some((row) => !CROSSPOINT_DEVICE_ID.test(row.device_id));
+  ).all(userId, document, userId) as { device_id: string; device: string }[];
+  return rows.some((row) => !CROSSPOINT_FAMILY.test(row.device) && !CROSSPOINT_FAMILY.test(row.device_id));
 }
 
 export function latestPercentage(db: DB, userId: number, document: string): number | null {
