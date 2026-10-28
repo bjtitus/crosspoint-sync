@@ -271,7 +271,8 @@ async function pullProgress(
 ): Promise<InboundChange | null> {
   const c = parseCred(cred);
   if (!c) return null;
-  if (ctx && hasPathOnlyReader(ctx.db, ctx.userId, m.externalId)) return null;
+  const stockReaderSynced = () => ctx !== undefined && hasPathOnlyReader(ctx.db, ctx.userId, ctx.document ?? m.externalId);
+  if (stockReaderSynced()) return null;
   const res = await http(`${c.server}/syncs/progress/${encodeURIComponent(m.externalId)}`, {
     method: 'GET',
     headers: headers(c),
@@ -281,6 +282,7 @@ async function pullProgress(
   if (res.status < 200 || res.status >= 300) return null;
   const body = await readJson(res);
   if (body.progress !== BOOK_PLACE_PROGRESS || typeof body.percentage !== 'number') return null;
+  if (stockReaderSynced()) return null;
   const percentage = Math.max(0, Math.min(1, body.percentage));
   const stamp = typeof body.timestamp === 'number' ? body.timestamp * MS_PER_SECOND : Date.now();
   return { externalId: m.externalId, percentage, finished: false, updatedAtMs: stamp, furthestReadOnly: true };

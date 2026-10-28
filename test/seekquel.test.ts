@@ -5,6 +5,7 @@ import type { HttpTransport, OutboundEvent } from '../src/connectors/types.js';
 import { drainQueue } from '../src/connectors/runner.js';
 import { claimReady } from '../src/connectors/queue.js';
 import { seekquelBase, seekquelConnector } from '../src/connectors/seekquel.js';
+import { upsertProgress } from '../src/routes/kosync.js';
 
 function fakeTransport() {
   const calls: { url: string; method: string; headers?: Record<string, string>; body?: string }[] = [];
@@ -302,7 +303,7 @@ describe('seekquel connector (end to end)', () => {
     await app.request('/syncs/progress', {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device: 'CrossPoint', device_id: 'A1B2C3D4', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device: "El's X4 Pro", device_id: 'crosspoint-a1b2c3', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
     });
     await drainQueue(db, fake.transport, 10);
 
@@ -322,7 +323,7 @@ describe('seekquel connector (end to end)', () => {
     await app.request('/syncs/progress', {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device: 'CrossInk', device_id: 'crossink-9F8E7D6C', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device: 'CrossInk X4', device_id: 'crossink-9f8e7d', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
     });
     await drainQueue(db, fake.transport, 10);
 
@@ -341,14 +342,54 @@ describe('seekquel connector (end to end)', () => {
       headers,
       body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage, device, device_id, metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
     });
-    await put('CrossPoint', 'A1B2C3D4', 0.2);
-    await put('Kindle', 'kindle-paperwhite-uuid', 0.2);
+    await put("El's X4 Pro", 'crosspoint-a1b2c3', 0.2);
+    await put('CrossPoint', 'kindle-paperwhite-uuid', 0.2);
     await drainQueue(db, fake.transport, 10);
 
     vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
     fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: 'seekquel-linked-copy', percentage: 0.5, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_000 });
     const got = (await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()) as { percentage: number };
     expect(got.percentage).toBe(0.2);
+  });
+
+  it('is not held back by a service that was linked once and has since been unlinked', async () => {
+    const fake = fakeTransport();
+    const { app, db, headers } = await linkSeekquel(fake);
+    await app.request('/syncs/progress', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ document: DOC, progress: '/body/p[2]', percentage: 0.2, device: 'CrossPoint', device_id: 'crosspoint-a1b2c3', metadata: { title: 'Piranesi', authors: 'Susanna Clarke' } }),
+    });
+    const userId = (db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number }).id;
+    upsertProgress(db, { userId, document: DOC, deviceId: 'spotify', device: 'Spotify', percentage: 0.1, progress: 'spotify:100000', position: null, metadata: null, updatedAt: 1_760_000_000 });
+    await drainQueue(db, fake.transport, 10);
+
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
+    fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: 'seekquel-linked-copy', percentage: 0.5, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_000 });
+    const got = (await (await app.request(`/syncs/progress/${DOC}`, { headers })).json()) as { percentage: number };
+    expect(got.percentage).toBe(0.5);
+  });
+
+  it('checks the book under our own id, and again once Seekquel has answered', async () => {
+    const fake = fakeTransport();
+    const { db } = await linkSeekquel(fake);
+    const userId = (db.prepare('SELECT id FROM users LIMIT 1').get() as { id: number }).id;
+    const OTHER = 'f'.repeat(32);
+    const stock = (document: string) => upsertProgress(db, { userId, document, deviceId: 'kindle-paperwhite-uuid', device: 'Kindle', percentage: 0.2, progress: '/body/p[2]', position: null, metadata: null, updatedAt: 1_760_000_000 });
+    fake.on(`/syncs/progress/${DOC}`, 200, { document: DOC, progress: 'seekquel-linked-copy', percentage: 0.5, device: 'Seekquel', device_id: 'seekquel', timestamp: 1_760_000_000 });
+
+    const linkCalls = fake.calls.length;
+
+    stock(OTHER);
+    expect(await seekquelConnector.pullProgress!(CRED, MATCH, fake.transport, 0, { db, userId, document: OTHER })).toBeNull();
+    expect(fake.calls).toHaveLength(linkCalls);
+
+    const midRequest: HttpTransport = async (url, init) => {
+      stock(DOC);
+      return fake.transport(url, init);
+    };
+    expect(await seekquelConnector.pullProgress!(CRED, MATCH, midRequest, 0, { db, userId, document: DOC })).toBeNull();
+    expect(fake.calls).toHaveLength(linkCalls + 1);
   });
 
   it('does not store a link whose key Seekquel refuses', async () => {
