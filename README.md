@@ -148,7 +148,7 @@ DATABASE_PATH=./data/crosspoint.db PORT=8080 node dist/index.js
 | `LEGACY_WEB` | _(unset)_ | The website is the CrossPoint Sync app at `/app/` (the old account pages redirect there; Kindle setup keeps its pages). Set `1` to keep the old server-rendered website instead. |
 | `HARDCOVER_CLIENT_ID` | CrossPoint Sync's app | Optional. Hardcover OAuth client id for "Connect Hardcover" sign-in. The built-in id is CrossPoint Sync's public Hardcover app and works for self-hosted servers too; set this only to use your own Hardcover developer app. |
 | `SEARCHAPI_KEY` | _(unset)_ | Optional, paid ([searchapi.io](https://www.searchapi.io)). Last fallback for print page counts: Amazon search + product "Print length", 2 requests per book, only for books the free sources miss. Cached forever. |
-| `SEEKQUEL_URL` | `https://api.seekquel.app` | Optional. The Seekquel API the Seekquel connector links to and sends to. Only for testing against a local Seekquel. |
+| `SEEKQUEL_URL` | `https://api.seekquel.app` | Optional. The Seekquel API the Seekquel connector links to and syncs with. Only for testing against a local Seekquel. |
 | `CORS_ORIGINS` | `*` | Origins allowed to call the sync API from browsers (comma-separated). The default wildcard is safe: the API authenticates with headers, not cookies, and the web UI's cookie routes never get CORS headers. |
 
 With `BASE_PATH=/crosspoint-sync`, open `https://your-host/crosspoint-sync/`

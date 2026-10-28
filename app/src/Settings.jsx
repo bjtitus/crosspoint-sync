@@ -46,7 +46,7 @@ const HINTS = {
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
   jellyfin: 'Syncs reading progress with your Jellyfin book library (Jellyfin 12.0 or newer). Sign in with your Jellyfin username and password.',
   bookorbit: 'Syncs progress both ways, adds clippings as highlights, and exchanges reading sessions for matched books. Imports BookOrbit history and exports sessions recorded by newer CrossInk firmware. Includes other BookOrbit reader history alongside your device stats. Repeated sessions are counted once.',
-  seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. You approve the request in the Seekquel app.',
+  seekquel: 'Logs your reading in your Seekquel library: where you are in each book, the books you finish, and your highlights. If you read further in Seekquel, that place comes back to your reader. You approve the request in the Seekquel app.',
   spotify: 'Moves your progress forward when you listen ahead in the Spotify audiobook, and resumes it there. Audiobooks are in the US, UK, Canada, Ireland, Australia and New Zealand.',
   kindle: 'Linking needs the CrossPoint Kindle Link browser extension.',
 }
