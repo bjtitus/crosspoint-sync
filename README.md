@@ -23,6 +23,9 @@ The full wire contract is in [docs/API.md](docs/API.md).
 
 ### Docker
 
+Published images support `linux/amd64` and `linux/arm64` (including Raspberry Pi
+running a 64-bit OS). Docker automatically selects the matching architecture.
+
 ```sh
 docker run -d --name crosspoint-sync \
   -p 8080:8080 \

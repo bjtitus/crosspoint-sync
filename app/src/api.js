@@ -284,6 +284,14 @@ export const api = {
   // Public reading profile: { slug } (null = off).
   profile: (s) => call(s, '/api/v1/profile'),
   setProfile: (s, enabled) => call(s, '/api/v1/profile', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  // Archives must be fetched online and never stored in the offline cache.
+  exportAccount: (s) => call(s, '/api/v1/account/export', {}, false),
+  async importAccount(s, archive, mode) {
+    const result = await call(s, '/api/v1/account/import', { method: 'POST', body: JSON.stringify({ archive, mode }) }, false)
+    sessionVersion++
+    clearOffline()
+    return result
+  },
   // The sync account itself.
   changePassword: (s, password) => call(s, '/api/v1/account/password', { method: 'POST', body: JSON.stringify({ key: SparkMD5.hash(password) }) }),
   clearData: (s) => call(s, '/api/v1/account/data', { method: 'DELETE' }),

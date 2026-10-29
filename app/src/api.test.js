@@ -224,3 +224,22 @@ it('loads every page of a connector review list', async () => {
   expect((await api.review(session('pager'), 'hardcover')).map((b) => b.document)).toEqual(['a', 'b'])
   expect(fetchMock.mock.calls[1][0]).toBe('https://sync.test/api/v1/connectors/hardcover/review?cursor=1%3Aa')
 })
+
+
+it('exports online without caching and invalidates offline data only after a successful import', async () => {
+  const s = session('reader')
+  const archive = { format: 'crosspoint-sync-account', version: 1 }
+  fetchMock.mockResolvedValueOnce(response(archive))
+  expect(await api.exportAccount(s)).toEqual(archive)
+  expect(Object.keys(localStorage)).toHaveLength(0)
+  fetchMock.mockRejectedValueOnce(new Error('offline'))
+  await expect(api.exportAccount(s)).rejects.toThrow('offline')
+  localStorage.setItem(`${prefix(s)}${progress}`, JSON.stringify({ items: [] }))
+  fetchMock.mockResolvedValueOnce(response({ message: 'Conflict' }, 409))
+  await expect(api.importAccount(s, archive, 'empty')).rejects.toThrow('Conflict')
+  expect(cached.books(s)).toEqual([])
+  fetchMock.mockResolvedValueOnce(response({ imported: 1 }))
+  await api.importAccount(s, archive, 'replace')
+  expect(cached.books(s)).toBeNull()
+  expect(fetchMock).toHaveBeenLastCalledWith('https://sync.test/api/v1/account/import', expect.objectContaining({ method: 'POST', body: JSON.stringify({ archive, mode: 'replace' }) }))
+})

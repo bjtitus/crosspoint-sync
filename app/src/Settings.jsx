@@ -5,6 +5,7 @@ import { ArrowLeft, ChevronRight, Copy, KeyRound, ListChecks, Loader2, LogOut, M
 import SparkMD5 from 'spark-md5'
 import { api, isApp } from './api.js'
 import { ActionSheet, Bone, Card, EmptyState, notify, Toggle, useLoad } from './ui.jsx'
+import { saveFile } from './shareCard.js'
 import { useNativeBack } from './tabbar.js'
 
 // Appearance: follow the system, or force light or dark.
@@ -757,6 +758,67 @@ function Profile({ session }) {
   )
 }
 
+export function AccountTransfer({ session }) {
+  const [busy, setBusy] = useState(false)
+  const [archive, setArchive] = useState(null)
+  const [replace, setReplace] = useState(false)
+  const [error, setError] = useState(null)
+  const input = useRef(null)
+  const button = 'min-h-11 rounded-xl bg-stone-100 px-4 text-sm font-semibold text-stone-800 disabled:opacity-50'
+  async function download() {
+    setBusy(true)
+    setError(null)
+    try {
+      const data = await api.exportAccount(session)
+      await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'crosspoint-sync-account.json')
+    } catch (e) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+  async function select(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setError(null)
+    setReplace(false)
+    setBusy(true)
+    try {
+      if (file.size > 50 * 1024 * 1024) throw new Error('Choose an archive smaller than 50 MB.')
+      const data = JSON.parse(await file.text())
+      if (data?.format !== 'crosspoint-sync-account' || data.version !== 1 || !data.data) throw new Error('Choose a CrossPoint Sync account export (version 1).')
+      setArchive(data)
+    } catch (e) { setError(e.message) }
+    finally { setBusy(false) }
+  }
+  return (
+    <Card className="mt-3 space-y-3 p-4">
+      <p className="text-sm text-stone-500">Move your library, progress, bookmarks, clippings, device reading history and account preferences between servers. Sign in to the destination account before importing.</p>
+      <p className="text-sm text-stone-500">Passwords, linked services and their imported history, and device-only settings are excluded. Keep the export private: it contains your reading data.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={button} disabled={busy || !!archive} onClick={download}>{busy ? 'Working…' : 'Export account data'}</button>
+        <button type="button" className={button} disabled={busy || !!archive} onClick={() => input.current.click()}>Import data</button>
+        <input ref={input} type="file" accept=".json,application/json" aria-label="Account archive" className="hidden" onChange={select} />
+      </div>
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      {archive && (
+        <ActionSheet title="Import account data?" actionLabel="Import data" pendingLabel="Importing…" danger={replace}
+          onClose={() => setArchive(null)}
+          onConfirm={async () => {
+            await api.importAccount(session, archive, replace ? 'replace' : 'empty')
+            notify({ title: 'Account data imported' })
+            location.hash = '#/'
+            location.reload()
+          }}>
+          <span>Import into {session.username} on {session.server}. Your destination login and connected service credentials stay the same. Public profiles get a link on this server.</span>
+          <label className="mt-3 flex items-start gap-2">
+            <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+            <span>Replace existing reading data and book matches. Export a backup first. Without this, importing requires an empty library.</span>
+          </label>
+        </ActionSheet>
+      )}
+    </Card>
+  )
+}
+
 // Password, clear data, delete: what the website's account page did.
 function Account({ session, onSession, onLogout }) {
   const [action, setAction] = useState(null)
@@ -916,6 +978,9 @@ export default function Settings({ session, theme, onSession, onLogout }) {
       <h2 className={section}>Connected services</h2>
       <p className="mt-1 text-sm text-stone-500">Your reading syncs out to these as you go.</p>
       <Services session={session} />
+
+      <h2 className={section}>Account migration</h2>
+      <AccountTransfer session={session} />
 
       <h2 className={section}>Public profile</h2>
       <p className="mt-1 text-sm text-stone-500">A page with your reading stats and shelves to link to or embed on a website. Turning it off and on makes a new link.</p>
