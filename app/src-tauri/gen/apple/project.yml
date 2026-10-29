@@ -30,6 +30,8 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
+      # Liquid Glass app icon (Icon Composer); actool also flattens it for iOS < 26.
+      - path: AppIcon.icon
       # Static libs here are linked below, never bundled: App Store rejects a
       # stray libapp.a resource (ITMS-90171).
       - path: Externals
