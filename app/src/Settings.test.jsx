@@ -369,10 +369,38 @@ describe('account migration controls', () => {
   it('exports using the shared native/browser file saver', async () => {
     const { saveFile } = await import('./shareCard.js')
     api.exportAccount.mockResolvedValue(archive)
+    saveFile.mockResolvedValue({ where: 'crosspoint-sync-account.json', photos: false })
     render(<AccountTransfer session={reader} />)
     fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(expect.any(Blob), 'crosspoint-sync-account.json'))
     expect(api.exportAccount).toHaveBeenCalledWith(reader)
+    expect((await screen.findByRole('status')).textContent).toContain('Downloaded crosspoint-sync-account.json')
+  })
+  it.each(['iPhone', 'iPad'])('shows the Files location and actual filename on %s', async (device) => {
+    env.isApp = true
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(device)
+    const { saveFile } = await import('./shareCard.js')
+    api.exportAccount.mockResolvedValue(archive)
+    saveFile.mockResolvedValue({ where: '/var/mobile/Containers/Data/Application/app/Documents/crosspoint-sync-account (1).json', photos: false })
+    render(<AccountTransfer session={reader} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
+    expect((await screen.findByRole('status')).textContent).toBe('Saved crosspoint-sync-account (1).json in the Files app: Browse → On My iPhone/iPad → CrossPoint Sync.')
+    expect(screen.getByRole('button', { name: 'Export account data' }).disabled).toBe(false)
+    saveFile.mockRejectedValueOnce('No space left on device')
+    fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('No space left on device')
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Export account data' }).disabled).toBe(false)
+  })
+  it('shows the Android export folder', async () => {
+    env.isApp = true
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Android')
+    const { saveFile } = await import('./shareCard.js')
+    api.exportAccount.mockResolvedValue(archive)
+    saveFile.mockResolvedValue({ where: 'Download/CrossPoint Sync/crosspoint-sync-account.json', photos: false })
+    render(<AccountTransfer session={reader} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Export account data' }))
+    expect((await screen.findByRole('status')).textContent).toBe('Saved crosspoint-sync-account.json to Downloads → CrossPoint Sync.')
   })
   it('requires confirmation, preserves the conflict error and supports explicit replacement', async () => {
     const reload = vi.fn()

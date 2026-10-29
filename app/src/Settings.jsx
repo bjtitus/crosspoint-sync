@@ -763,15 +763,22 @@ export function AccountTransfer({ session }) {
   const [archive, setArchive] = useState(null)
   const [replace, setReplace] = useState(false)
   const [error, setError] = useState(null)
+  const [saved, setSaved] = useState(null)
   const input = useRef(null)
   const button = 'min-h-11 rounded-xl bg-stone-100 px-4 text-sm font-semibold text-stone-800 disabled:opacity-50'
   async function download() {
     setBusy(true)
     setError(null)
+    setSaved(null)
     try {
       const data = await api.exportAccount(session)
-      await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'crosspoint-sync-account.json')
-    } catch (e) { setError(e.message) }
+      const result = await saveFile(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'crosspoint-sync-account.json')
+      const filename = result.where.split('/').pop()
+      const ios = isApp && (/iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+      setSaved(ios
+        ? `Saved ${filename} in the Files app: Browse → On My iPhone/iPad → CrossPoint Sync.`
+        : isApp ? `Saved ${filename} to ${result.where.startsWith('Download/CrossPoint Sync/') ? 'Downloads → CrossPoint Sync' : 'your Downloads folder'}.` : `Downloaded ${filename}. Check your browser’s downloads.`)
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
   async function select(e) {
@@ -798,6 +805,7 @@ export function AccountTransfer({ session }) {
         <button type="button" className={button} disabled={busy || !!archive} onClick={() => input.current.click()}>Import data</button>
         <input ref={input} type="file" accept=".json,application/json" aria-label="Account archive" className="hidden" onChange={select} />
       </div>
+      {saved && <p role="status" className="text-sm text-stone-600">{saved}</p>}
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       {archive && (
         <ActionSheet title="Import account data?" actionLabel="Import data" pendingLabel="Importing…" danger={replace}
