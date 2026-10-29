@@ -866,6 +866,24 @@ after normalization) can match with case and punctuation differences ignored, ag
 the entire quote to be unique. Short selections remain strict. Clippings with offsets continue
 to use their exact saved positions and text checks.
 
+**Readwise Books** (`readwise-books`, beta; the Readwise Books API at `readwise.io/books_api`, same
+access token as the other Readwise connectors) carries shelf state and reading sessions. A progress
+event adds the book to the Readwise library when it is missing (`POST /books`, matched by Readwise
+from the EPUB's title and author; filename-only documents are never added), moves it to Currently
+reading and sets `started_reading_at` once; a finished event sets Finished and
+`finished_reading_at`. Books already Finished, Did not finish or Deleted on Readwise are left as
+they are. Matching searches the user's own library; the manual-match picker searches it too and
+accepts a pasted Readwise book id. Measured device sessions (`PUT /stats/sessions`) are exported as
+ebook sessions once they have settled (30 minutes after their end), with the session's active time
+as its unpaused time and its start/end percentages taken from the progress history (the last
+position before it started, the furthest position by 15 minutes after it ended). Readwise cannot
+change a session's duration, so a checkpoint that grows after export is deleted there and posted
+again; export records survive an unlink so a re-link never posts a session twice. Exports run on
+upload, on **Sync now**, and every ten minutes. The `position_sessions` option (default off) mirrors
+the reading position for readers that send no sessions, as one-minute sessions paused for their
+whole span (no reading time), from Readwise's current position to the synced one. Readwise's rate
+limits (20/min reads, 50/min writes) park a token for a minute after a 429.
+
 The connector list includes `queue_errors: [{kind, message, count}]` for linked services: up to
 three recent grouped failures for that user's service, including pending retries and permanently
 failed items. Completed items no longer contribute errors. Settings shows waiting/failed counts

@@ -42,6 +42,7 @@ const HINTS = {
   microblog: 'Keeps your Currently reading and Finished reading bookshelves in sync.',
   readwise: 'Syncs your highlights to Readwise.',
   'readwise-reader': 'Archives books in Reader when you finish them, and brings your Reader progress back.',
+  'readwise-books': 'Keeps your Readwise Books shelf up to date: books you open go to Currently reading with a start date, finished books are marked Finished, and reading sessions from CrossInk readers are logged as reading time.',
   kosync: 'Mirrors your reading progress to another KOReader-compatible (KOSync) server. For Calibre-Web, use your library URL ending in /kosync.',
   bookfusion: 'Syncs reading progress with BookFusion. You approve the request on bookfusion.com.',
   audiobookshelf: 'Keeps your place between the ebook and the audiobook. Create an API key in Audiobookshelf under Settings, Users, API Keys.',
@@ -57,6 +58,7 @@ const TOKEN_HELP = {
   microblog: ['Get an app token', 'https://micro.blog/account/apps'],
   readwise: ['Get your access token', 'https://readwise.io/access_token'],
   'readwise-reader': ['Get your access token', 'https://readwise.io/access_token'],
+  'readwise-books': ['Get your access token', 'https://readwise.io/access_token'],
 }
 
 const open = (url) => (isApp ? openUrl(url) : window.open(url, '_blank', 'noopener'))

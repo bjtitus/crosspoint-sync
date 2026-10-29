@@ -59,8 +59,11 @@ for (const f of fs.readdirSync(path.join(ASSETS_DIR, 'landing'))) {
   if (f.endsWith('.webp')) LANDING_IMAGES.set(f, fs.readFileSync(path.join(ASSETS_DIR, 'landing', f)));
 }
 
-// Readwise Reader shares the Readwise icon.
-if (SERVICE_ICONS.has('readwise')) SERVICE_ICONS.set('readwise-reader', SERVICE_ICONS.get('readwise')!);
+// Readwise Reader and Readwise Books share the Readwise icon.
+if (SERVICE_ICONS.has('readwise')) {
+  SERVICE_ICONS.set('readwise-reader', SERVICE_ICONS.get('readwise')!);
+  SERVICE_ICONS.set('readwise-books', SERVICE_ICONS.get('readwise')!);
+}
 
 const STYLE = `
   :root {
@@ -281,6 +284,9 @@ const LANDING = (basePath: string) => shell(basePath,
      <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise Reader</div>
        <div class="desc">Archive books in Reader when you finish them, and bring your Reader progress back.</div></div></div>
        <span class="pill">ready</span></div>
+     <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/readwise.png" alt="" width="34" height="34"><div><div class="name">Readwise Books</div>
+       <div class="desc">Keep your Readwise Books shelf and reading dates up to date, and log reading sessions from CrossInk readers as reading time.</div></div></div>
+       <span class="pill warn">beta</span></div>
      <div class="svc"><div class="lead"><img class="svc-icon" src="${basePath}/icons/audiobookshelf.png" alt="" width="34" height="34"><div><div class="name">Audiobookshelf</div>
        <div class="desc">Keep your place between the ebook and the audiobook, both ways. Read some, then pick up listening right where you left off.</div></div></div>
        <span class="pill">ready</span></div>
@@ -616,6 +622,7 @@ const HINTS = {
   microblog: 'Connect an app token to keep your Currently reading and Finished reading bookshelves in sync.',
   readwise: 'Paste your Readwise access token from readwise.io/access_token. Syncs your highlights.',
   'readwise-reader': 'Paste your Readwise access token from readwise.io/access_token. Archives books in Reader when you finish them, and brings your Reader progress back to your device.',
+  'readwise-books': 'Paste your Readwise access token from readwise.io/access_token. Books you open move to Currently reading on your Readwise Books shelf, finished books are marked Finished with their dates, and reading sessions from CrossInk readers are logged as reading time.',
   kosync: 'Mirror your reading progress to another KOReader-compatible (KOSync) server, so your other devices see it too.',
   bookfusion: 'Connect your BookFusion account to sync reading progress. You will approve the request on bookfusion.com.',
   audiobookshelf: 'Sync your reading position to the matching audiobook on your Audiobookshelf server. Create an API key in Audiobookshelf under Settings, Users, API Keys.',

@@ -21,6 +21,7 @@ import { bookorbitExclusions, readBookorbitStats } from '../../models/bookorbit-
 
 import { parseReadingSession } from '../../models/reading-sessions.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
+import { exportReadwiseSessions } from '../../connectors/readwise-books-sessions.js';
 
 const MAX_BOOK_BATCH = 20;
 const DEFAULT_BOOK_PAGE = 50;
@@ -164,6 +165,8 @@ export function statsRoutes(db: DB, http?: HttpTransport): Hono<AppEnv> {
     });
     for (const document of new Set<string>(items.map((s: any) => resolveDocument(db, userId, s.document)))) {
       void importBookorbitStats(db, userId, http, { document }).catch(() => {});
+      // Readwise gets settled sessions only; a fresh checkpoint waits for the periodic pass.
+      void exportReadwiseSessions(db, userId, http, document).catch(() => {});
     }
     return c.json({ until: now, accepted_session_ids: items.map((s: any) => s.session_id) });
   });

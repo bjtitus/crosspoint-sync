@@ -33,6 +33,7 @@ import {
 import { isValidDocument, listCursor, parseListCursor } from '../kosync.js';
 import { ConnectorOperationError, type HttpTransport } from '../../connectors/types.js';
 import { importBookorbitStats } from '../../connectors/bookorbit-stats.js';
+import { exportReadwiseSessions, sessionExportErrors } from '../../connectors/readwise-books-sessions.js';
 import { resolveDocument } from '../../models/merge.js';
 import { hasDocumentData } from '../../models/document.js';
 
@@ -205,7 +206,7 @@ export function connectorRoutes(
               FROM bookorbit_session_exports e JOIN reading_sessions local USING(user_id, device_id, session_id)
               JOIN bookorbit_session_destination d ON d.user_id=e.user_id AND d.destination=e.destination
               WHERE e.user_id=? AND e.exported_seconds < local.seconds AND e.last_error IS NOT NULL GROUP BY e.last_error LIMIT 3`)
-              .all(user.id) : [])] : undefined,
+              .all(user.id) : []), ...(conn.id === 'readwise-books' ? sessionExportErrors(db, user.id) : [])] : undefined,
           ...(conn.options ? { options: conn.options, option_values: account ? connectorOptions(db, user.id, conn) : null } : {}),
         };
       }),
@@ -255,6 +256,7 @@ export function connectorRoutes(
     const first = !getAccount(db, user.id, conn.id);
     upsertAccount(db, user.id, conn.id, cred as Record<string, unknown>, result.accountLabel ?? null);
     if (conn.id === 'bookorbit') void importBookorbitStats(db, user.id, transport);
+    if (conn.id === 'readwise-books') void exportReadwiseSessions(db, user.id, transport).catch(() => {});
     if (first && conn.id === 'jellyfin') {
       jellyfinFirstSync(db, user.id, transport).catch((err) =>
         console.error(JSON.stringify({ msg: 'first sync failed', connector: conn.id, user_id: user.id,
@@ -510,6 +512,7 @@ export function connectorRoutes(
       db.prepare('UPDATE bookorbit_stats_sync SET refreshed_at = 0 WHERE user_id = ?').run(user.id);
       void importBookorbitStats(db, user.id, transport);
     }
+    if (conn.id === 'readwise-books') void exportReadwiseSessions(db, user.id, transport).catch(() => {});
     return c.json({ queued });
   });
 
@@ -660,6 +663,7 @@ export function connectorRoutes(
         return c.json({ message: 'Service connection changed; try again' }, 409);
       }
       const queued = backfillConnector(db, userId, conn.id, document);
+      if (conn.id === 'readwise-books') void exportReadwiseSessions(db, userId, transport, document).catch(() => {});
       if (conn.id !== 'bookorbit') return c.json({ applied, queued });
       const history = db.prepare('SELECT active_generation, cutoff FROM bookorbit_stats_sync WHERE user_id=? AND external_id=?')
         .get(userId, match.externalId);

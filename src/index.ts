@@ -7,6 +7,7 @@ import { loadSessionSecret } from './auth/session.js';
 import { startQueueWorker } from './connectors/runner.js';
 import { pollMatched, pollSpotify, startFanInWorker } from './connectors/fanin.js';
 import { autoPause } from './models/pause.js';
+import { exportAllReadwiseSessions } from './connectors/readwise-books-sessions.js';
 
 const DATABASE_PATH = process.env.DATABASE_PATH ?? '/data/crosspoint.db';
 const PORT = Number(process.env.PORT ?? 8080);
@@ -30,6 +31,8 @@ if (connectorsEnabled) {
   startFanInWorker(db, 60 * 60_000, (d) => pollMatched(d, 'jellyfin'));
   startFanInWorker(db, 15 * 60_000, (d) => pollMatched(d, 'audiobookshelf'));
   startFanInWorker(db, 60 * 60_000, pollSpotify);
+  // Readwise Books: device reading sessions are exported once they have settled.
+  startFanInWorker(db, 10 * 60_000, (d) => exportAllReadwiseSessions(d));
 }
 // Daily: pause books with no progress for each user's auto-pause days (reads also check lazily).
 startFanInWorker(db, 24 * 60 * 60_000, async (d) => autoPause(d));

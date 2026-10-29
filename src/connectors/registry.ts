@@ -2,6 +2,7 @@ import type { Connector, HttpTransport } from './types.js';
 import { hardcoverConnector } from './hardcover.js';
 import { readwiseConnector } from './readwise.js';
 import { readwiseReaderConnector } from './readwise-reader.js';
+import { readwiseBooksConnector } from './readwise-books.js';
 import { kosyncConnector } from './kosync.js';
 import { bookfusionConnector } from './bookfusion.js';
 import { audiobookshelfConnector } from './audiobookshelf.js';
@@ -18,6 +19,7 @@ const CONNECTORS: Connector[] = [
   hardcoverConnector,
   readwiseConnector,
   readwiseReaderConnector,
+  readwiseBooksConnector,
   bookfusionConnector,
   audiobookshelfConnector,
   jellyfinConnector,
